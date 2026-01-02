@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>OTTER Read-only Prototype</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="title">OTTER Prototype</div>
+
+      <button id="btnChoose">Choose Audio…</button>
+      <button id="btnTranscribe" disabled>Transcribe</button>
+      <button id="btnToggleLog">Show Log</button>
+      <div class="statusArea">
+        <div id="status"></div>
+        <progress id="transcribeProgress" value="0" max="100" hidden></progress>
+      </div>
+    </header>
+
+    <main>
+      <section class="wavePane">
+        <div id="waveform"></div>
+
+        <div class="transport">
+          <button id="btnPlay" disabled aria-label="Play/Pause" title="Play/Pause">▶︎</button>
+          <span id="time"></span>
+        </div>
+
+        <div id="waveDetailPane" hidden>
+          <hr>
+          <div id="waveDetail"></div>
+
+          <div class="transport" id="detailTransport">
+            <button id="btnDetailPlay" disabled aria-label="Play/Pause Detail" title="Play/Pause Detail">▶︎</button>
+            <button id="btnRegion" disabled aria-label="Play Region" title="Play Region">[▶]</button>
+            <span id="detailTime"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="textPane">
+        <div class="paneTitle">Transcript (click a word to seek)</div>
+        <div id="transcript"></div>
+
+        <div id="logContainer" hidden>
+          <div class="paneTitle">Logs</div>
+          <pre id="log"></pre>
+        </div>
+      </section>
+    </main>
+
+    <script src="./node_modules/wavesurfer.js/dist/wavesurfer.min.js"></script>
+    <script src="./node_modules/wavesurfer.js/dist/plugins/regions.min.js"></script>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

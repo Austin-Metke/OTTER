@@ -1,0 +1,106 @@
+body { margin: 0; font-family: system-ui, -apple-system, sans-serif; }
+
+.title { font-weight: 700; margin-right: 8px; }
+
+#status {
+  display: none;              /* hidden by default */
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+/* Status pill states used during transcription */
+#status.info    { background: #e5e7eb; color: #1f2937; }
+#status.working { background: #dbeafe; color: #1e40af; }
+#status.error   { background: #fee2e2; color: #991b1b; }
+#status.success { background: #dcfce7; color: #166534; }
+
+/* Main two-pane layout:
+ *   left  = audio waveforms
+ *   right = transcript text
+ */
+main {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  height: calc(100vh - 52px);
+}
+
+.wavePane { padding: 12px; border-right: 1px solid #ddd; }
+#waveform { height: 230px; border: 1px solid #ddd; border-radius: 8px; }
+.transport { margin-top: 10px; display: flex; gap: 12px; align-items: center; }
+#waveDetailPane {
+  padding-top: 2em;
+  /* Region highlight color for the detail waveform.
+   * Read by renderer.js and passed to WaveSurfer regions.
+   */
+  --word-region-color: rgba(0, 200, 0, 0.35);
+}
+#waveDetail { height: 90; border: 1px solid #ddd; border-radius: 8px; }
+.wavePane {
+  
+}
+.textPane { padding: 12px; overflow: auto; }
+.paneTitle { margin: 10px 0 6px; font-weight: 650; }
+#transcript { line-height: 1.8; font-size: 16px; }
+
+/* Individual transcript words are interactive and act as
+ * navigation controls for audio playback.
+ */
+.word { cursor: pointer; padding: 1px 2px; border-radius: 4px; }
+.word:hover { background: #f1f1f1; }
+.word.active {
+  /* Currently playing or selected word */
+  background: #ffe08a;
+}
+
+#btnLoop.active {
+  background: #ffd966;
+  border-color: #e6b800;
+}
+
+#log {
+  background: #111; color: #ddd;
+  padding: 10px; border-radius: 8px;
+  max-height: 200px; overflow: auto;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #ddd;
+}
+
+.statusArea {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#status {
+  font-size: 14px;
+  color: #444;
+}
+
+#transcribeProgress {
+  width: 180px;
+  height: 14px;
+}
+
+#logContainer {
+  border-top: 1px solid #ddd;
+  padding: 8px;
+  background: #f9fafb;
+}
+
+#btnPlay {
+  width: 36px;
+  height: 32px;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0;
+}
+
