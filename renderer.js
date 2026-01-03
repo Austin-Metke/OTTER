@@ -58,6 +58,7 @@ const logContainer = document.getElementById("logContainer");
 const btnDetailPlay = document.getElementById("btnDetailPlay");
 const waveDetailPane = document.getElementById("waveDetailPane");
 const detailTimeEl = document.getElementById("detailTime");
+const detailBounds = document.getElementById("detailBounds");
 const btnRegion = document.getElementById("btnRegion");
 const WaveSurfer = window.WaveSurfer;
 
@@ -71,7 +72,6 @@ const DETAIL_PAD_AFTER  = 0.25; // seconds
 //
 // Global State
 //
-let detailRegion = null;
 let audioPath = null;
 let words = [];
 
@@ -84,6 +84,11 @@ function getCssVar(el, name, fallback) {
   if (!el) return fallback;
   const value = getComputedStyle(el).getPropertyValue(name).trim();
   return value || fallback;
+}
+
+// Format seconds as 0.00 (or choose your preferred format)
+function fmtSec(x) {
+  return Number(x).toFixed(2);
 }
 
 function setStatus(text, cls = "info") {
@@ -148,6 +153,7 @@ function setActiveIndex(idx) {
 function computeDetailWindow(start, end) {
   const winStart = Math.max(0, start - DETAIL_PAD_BEFORE);
   const winEnd = Math.max(winStart + 0.05, end + DETAIL_PAD_AFTER); // enforce minimum duration
+  detailWinStartAbs = winStart; // Remember where this detail starts in "absolute" time
   return { winStart, winEnd, winDur: winEnd - winStart };
 }
 
@@ -260,7 +266,7 @@ function setPlayIcon(isPlaying) {
 // Create the waveform visualization object
 const ws = WaveSurfer.create({
   container: "#waveform",
-  height: 220,
+  height: 80,
   normalize: true
 });
 
@@ -318,9 +324,23 @@ const detailRegions = WaveSurfer.Regions.create();
 // Create the detail region visualization object
 const wsDetail = WaveSurfer.create({
   container: "#waveDetail",
-  height: 80,
+  height: 220,
   plugins: [detailRegions]
 });
+
+// Update the UI element showing absolute bounds of the selected region
+function updateDetailBounds() {
+  if (!detailBounds) return;
+
+  if (!detailRegion) {
+    detailBounds.textContent = "[— - —]";
+    return;
+  }
+
+  const absStart = detailWinStartAbs + detailRegion.start;
+  const absEnd   = detailWinStartAbs + detailRegion.end;
+  detailBounds.textContent = `[${fmtSec(absStart)} - ${fmtSec(absEnd)}]`;
+}
 
 /**
  * Create or update the highlighted region in the detail waveform that
@@ -355,15 +375,80 @@ function setDetailWordRegion(localStart, localEnd) {
     resize: true,
     color: WORD_REGION_COLOR
   });
+  updateDetailBounds();
+  detailRegion.on("update", () => { updateDetailBounds(); });
+}
+
+/*
+ * -----------------------------------------------------------------------------
+ * Detail playback + region playback notes (PoC / WaveSurfer v7)
+ *
+ * Why this looks more complicated than expected:
+ * - WaveSurfer v7 drives playback through the browser's media stack (HTML media),
+ *   which does not provide a native "play exactly from A to B and stop" primitive.
+ * - We observed that seemingly simpler approaches can be unreliable in practice:
+ *     • wsDetail.play(start, end) may ignore `end` and continue to snippet end.
+ *     • Seeking and playing from a "finished" state can fail to restart audio
+ *       unless we reset state (pause/seek) and avoid stale stop logic.
+ *     • Stop-at-end logic based on timeupdate/audioprocess can be flaky because
+ *       event cadence isn't guaranteed, and mixing setTime() inside such handlers
+ *       can interact badly with plugins like Regions.
+ *
+ * What we do instead (stable PoC behavior):
+ *
+ * 1) "Play Region" (btnRegion):
+ *    - Clears any prior region stop timer (clearRegionStopTimer()).
+ *    - Resets playback state via wsDetail.pause().
+ *    - Seeks to region start (wsDetail.setTime(start)) and starts playback.
+ *    - Stops after (end-start) using a wall-clock timer (setTimeout).
+ *      This is intentionally timer-based, not event-based, to keep the demo
+ *      stable across browsers and edge cases.
+ *    - Leaves the playhead at region end for clarity (setTime(end)).
+ *
+ * 2) "Play/Pause Detail" (btnDetailPlay):
+ *    - Always clears any region timer first so region playback can't interfere.
+ *    - If the playhead is at/near the end, rewinds to 0 so Play produces audio.
+ *    - Uses explicit isPlaying()/play()/pause() rather than playPause() to avoid
+ *      toggle ambiguity when debugging.
+ *
+ * It may be tempting to "simplify" this, but any changes require re-testing region
+ * playback and detail playback after: repeated plays, starting near EOF, and
+ * switching between region play and full-detail play.
+ * -----------------------------------------------------------------------------
+ */
+
+let regionStopTimer = null;
+let detailRegion = null;
+// Absolute start time (seconds) of the currently-loaded detail snippet
+let detailWinStartAbs = 0;
+
+function clearRegionStopTimer() {
+  if (regionStopTimer) {
+    clearTimeout(regionStopTimer);
+    regionStopTimer = null;
+  }
 }
 
 // Handle the "Play Region" button being pressed
-btnRegion.addEventListener("click", () => {
-  if (detailRegion) {
-    wsDetail.play(detailRegion.start, detailRegion.end);
-  }
-});
+btnRegion.onclick = () => {
+  if (!detailRegion) return;
 
+  clearRegionStopTimer();       // cancel any prior region play
+  wsDetail.pause();             // reset playback state
+
+  const start = detailRegion.start;
+  const end   = detailRegion.end;
+  const ms    = Math.max(0, (end - start) * 1000);
+
+  wsDetail.setTime(start);
+  wsDetail.play();
+
+  regionStopTimer = setTimeout(() => {
+    wsDetail.pause();
+    wsDetail.setTime(Math.max(0, end - 0.001));
+    regionStopTimer = null;
+  }, ms);
+};
 
 // Update the time readout for the detail waveform during playback.
 // This reflects the current playhead position within the snippet,
@@ -378,7 +463,18 @@ wsDetail.on("pause", () => setDetailPlayIcon(false));
 wsDetail.on("finish", () => setDetailPlayIcon(false));
 
 // handle the "Play Region" button
-btnDetailPlay.addEventListener("click", () => wsDetail.playPause());
+btnDetailPlay.onclick = () => {
+  clearRegionStopTimer();
+
+  // If we're at/near end, restart so Play actually plays something.
+  const dur = wsDetail.getDuration();
+  const t = wsDetail.getCurrentTime();
+  if (dur && t >= dur - 0.02) wsDetail.setTime(0);
+
+  // Use explicit play/pause instead of playPause() if you want to be extra deterministic:
+  if (wsDetail.isPlaying()) wsDetail.pause();
+  else wsDetail.play();
+};
 
 // Adjust the icon in the "Play Detail" button
 function setDetailPlayIcon(isPlaying) {
