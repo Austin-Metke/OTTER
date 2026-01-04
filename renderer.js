@@ -454,7 +454,10 @@ btnRegion.onclick = () => {
 // This reflects the current playhead position within the snippet,
 // not the absolute time in the source audio.
 wsDetail.on("timeupdate", (t) => {
-  if (detailTimeEl) detailTimeEl.textContent = `${t.toFixed(2)}s`;
+  if (detailTimeEl) {
+    let absT = t + detailWinStartAbs;
+    detailTimeEl.textContent = `${absT.toFixed(2)}s`;
+  }
 });
 
 // Keep the Play Region button in sync with the status of region playback
