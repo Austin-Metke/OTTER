@@ -1,0 +1,4 @@
+python -m otter_py.transcribe run \
+  --audio test_data/BestWorst.wav \
+  --spec-file otter_py/sample_specs/wx_asw_cwt.json \
+  > otter_py/tmp/words_wx_asw_cwt.json
