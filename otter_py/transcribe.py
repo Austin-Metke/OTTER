@@ -24,7 +24,20 @@ import json
 import os
 import sys
 from typing import Any, Dict, Optional
+from contextlib import redirect_stdout
+import sys
 
+def run_with_stdout_redirect(fn):
+    """
+    Run `fn()` with stdout redirected to stderr.
+
+    Rationale:
+      Many ML/audio libraries print informational messages to stdout.
+      Our contract is that stdout is reserved for machine-readable JSON.
+      Redirecting stdout to stderr prevents accidental corruption of JSON output.
+    """
+    with redirect_stdout(sys.stderr):
+        return fn()
 
 def eprint(*args: Any, **kwargs: Any) -> None:
     """Print to stderr (keeps stdout reserved for machine-readable JSON)."""
@@ -74,8 +87,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.cmd == "list":
         data = list_components()
-        json.dump(data, sys.stdout, indent=2)
-        sys.stdout.write("\n")
+        json.dump(data, sys.stderr, indent=2)
+        sys.stderr.write("\n")
         return 0
 
     if args.cmd == "run":
@@ -92,9 +105,13 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         ctx: Dict[str, Any] = {"progress": progress}
 
-        result = run_pipeline(audio_path=audio_path, spec=spec, ctx=ctx)
+        # Run the pipeline with stdout redirected to stderr so that any library
+        # chatter (e.g. WhisperX notices) can't corrupt our JSON output channel.
+        result = run_with_stdout_redirect(
+            lambda: run_pipeline(audio_path=audio_path, spec=spec, ctx=ctx)
+        )
 
-        # For Electron's current needs you likely want just words[] on stdout.
+        # Emit machine-readable JSON ONLY on stdout.
         if args.emit_meta:
             json.dump(result, sys.stdout)
         else:

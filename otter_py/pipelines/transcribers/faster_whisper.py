@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple, Optional
 
 from otter_py.pipeline_registry import register_transcriber
+from otter_py.otter_debug import dbg, DebugLevel
 
 Word = Dict[str, Any]
 
@@ -123,6 +124,8 @@ def transcribe_faster_whisper(
     # Progress semantics:
     # - faster-whisper gives segment end-times; we approximate progress as seg.end / total duration.
     emit_pct(0)
+
+    dbg("transcribe_faster_whisper: 30")
 
     for seg in segments:
         if total and getattr(seg, "end", None) is not None:

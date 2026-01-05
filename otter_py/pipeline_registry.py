@@ -215,7 +215,7 @@ def run_pipeline(
     }
 
     # --- run post-processors in order
-    for p_spec in spec.get("post") or []:
+    for p_spec in spec.get("postprocessors") or []:
         p_id = p_spec.get("id")
         p_opts = p_spec.get("opts") or {}
         if not p_id:

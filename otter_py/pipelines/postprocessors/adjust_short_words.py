@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 from otter_py.pipeline_registry import register_postprocessor, Word
+from otter_py.otter_debug import dbg, DebugLevel
 
 @register_postprocessor(
     id="adjust_short_words",
@@ -50,6 +51,7 @@ def adjust_short_words(
 
     if len(words) < 3:
         # Nothing to do; return a shallow copy
+        dbg("adjust_short_words: Less than 3 words, returning")
         return list(words), {"adjusted": 0}
 
     out: List[Word] = []
@@ -64,6 +66,7 @@ def adjust_short_words(
         duration = w["end"] - w["start"]
 
         if duration < max_len:
+            # dbg(f"adjust_short_words: adjusting {w['word']}")
             extend = max(duration, min_extend)
             new_start = max(w["start"] - extend, prev["end"])
 
