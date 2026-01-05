@@ -85,15 +85,15 @@ def transcribe_whisperx_vad(
       - ctx["progress"] (callable): called with integer pct 0..100
       - ctx["_model_cache"] (dict): optional cache for loaded models across runs
 
-    Note:
-    WhisperX pulls in pyannote/speechbrain dependencies which currently emit
-    deprecation warnings about torchaudio.list_audio_backends(). These warnings
-    are upstream (TorchAudio → WhisperX) and not actionable here, so we suppress
-    them locally to keep PoC output readable.
     """
 
     dbg("Entered transcribe_whisperx_vad")
     
+    # Note:
+    # WhisperX pulls in pyannote/speechbrain dependencies which currently emit
+    # deprecation warnings about torchaudio.list_audio_backends(). These warnings
+    # are upstream (TorchAudio → WhisperX) and not actionable here, so we suppress
+    # them locally to keep PoC output readable.
     import warnings
     warnings.filterwarnings(
         "ignore",
@@ -134,10 +134,11 @@ def transcribe_whisperx_vad(
         )
         cache[asr_key] = asr_model
 
+    emit(10)
+
     # 2) Load audio for WhisperX
     audio = whisperx.load_audio(audio_path)
-
-    emit(10)
+    emit(15)
 
     # 3) ASR transcription (segment-level)
     # WhisperX returns dict with "segments" and "language"
@@ -150,7 +151,7 @@ def transcribe_whisperx_vad(
     detected_lang = result.get("language", None)
     lang_for_align = language or detected_lang
 
-    emit(60)
+    emit(70)
 
     # 4) Alignment model load (cached)
     if not lang_for_align:
