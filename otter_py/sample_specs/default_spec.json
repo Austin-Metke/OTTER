@@ -1,11 +1,25 @@
 {
   "transcriber": {
-    "id": "faster_whisper",
+    "id": "whisperx_vad",
     "opts": {
       "model": "small",
       "device": "cpu",
       "compute_type": "int8"
     }
   },
-  "postprocessors": []
+  "postprocessors": [
+    {
+      "id": "adjust_short_words",
+      "opts": {
+        "max_len": 0.30,
+        "min_extend": 0.10
+      }
+    },
+    {
+      "id": "clean_word_timings",
+      "opts": {
+        "tiny_gap_ms": 300.0
+      }
+    }
+  ]
 }
