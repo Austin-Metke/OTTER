@@ -125,8 +125,6 @@ def transcribe_faster_whisper(
     # - faster-whisper gives segment end-times; we approximate progress as seg.end / total duration.
     emit_pct(0)
 
-    dbg("transcribe_faster_whisper: 30")
-
     for seg in segments:
         if total and getattr(seg, "end", None) is not None:
             pct = int(min(99, (float(seg.end) / total) * 100))
