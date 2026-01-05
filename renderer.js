@@ -542,6 +542,7 @@ btnChoose.addEventListener("click", async () => {
     return;
   }
 
+  btnPlay.disabled = true;
   let fname = audioPath.split("/").pop();
   setStatus(`Loaded: ${fname}`, "success");
   setPlayIcon(false);
@@ -555,7 +556,6 @@ btnChoose.addEventListener("click", async () => {
   btnPlay.disabled = false;
 
   fnameEl.textContent = shortenFilenameMiddle(fname);
-  fnameSpan.title = fname;
 });
 
 
