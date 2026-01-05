@@ -26,6 +26,7 @@ import sys
 from typing import Any, Dict, Optional
 from contextlib import redirect_stdout
 import sys
+from pydash import get as deep_get
 
 def run_with_stdout_redirect(fn):
     """
@@ -112,13 +113,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
 
         # Emit machine-readable JSON ONLY on stdout.
-        if args.emit_meta:
-            json.dump(result, sys.stdout)
-        else:
-            json.dump(result["words"], sys.stdout)
+        if not args.emit_meta:
+            language = deep_get(result, "meta.transcriber.meta.language", default="unknown")
+            result.pop("meta", None)
+            result["language"] = language
+        
+        json.dump(result, sys.stdout)
 
         sys.stdout.write("\n")
         return 0
+
 
     parser.error("Unhandled command")
     return 2
