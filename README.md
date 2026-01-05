@@ -72,7 +72,13 @@ Why:
 + Avoids codec delays and frame-based imprecision
 + Keeps synchronization logic simple and predictable
 
-Students are encouraged to explore broader format support (e.g., MP3, AAC, normalization pipelines) as part of the capstone.
+Students are encouraged to explore broader format support (e.g., MP3, AAC, normalization pipelines) as part of the capstone. In the mean time, audio files can be converted to an acceptable WAV format using ffmpeg:
+
+```
+ ffmpeg -y -i input.aifc -c:a pcm_s16le -ac 1 output.wav
+```
+
+In this example we converted a format commonly produced by Apple devices into a standard WAV file.
 
 ## Installing, Launching, and Using the PoC
 
