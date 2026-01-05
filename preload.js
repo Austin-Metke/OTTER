@@ -67,13 +67,17 @@ contextBridge.exposeInMainWorld("otter", {
   chooseAudioFile: () => ipcRenderer.invoke("choose-audio-file"),
 
   /**
-   * Request transcription of an audio file using a local Whisper-based service.
+   * Request transcription of an audio file using the selected pipeline spec.
    *
    * @param {string} audioPath - Absolute path to the audio file
+   * @param {Object} [spec] - Optional pipeline spec selection:
+   *   - { mode: "file", name: "default_spec.json" }
+   *   - { mode: "json", jsonText: "{...}" }
+   *
    * @returns {Promise<Object>} Transcript data including word-level timings
    */
-  transcribeAudio: (audioPath) =>
-    ipcRenderer.invoke("transcribe-audio", audioPath),
+  transcribeAudio: (audioPath, spec) =>
+    ipcRenderer.invoke("transcribe-audio", audioPath, spec),
 
   /**
    * Register a callback to receive transcription log messages.
@@ -126,5 +130,31 @@ contextBridge.exposeInMainWorld("otter", {
    * Exposed for use by browser-oriented libraries that expect
    * ArrayBuffer input rather than file paths.
    */
-  readFileAsArrayBuffer
+  readFileAsArrayBuffer,
+
+  /**
+   * List available pipeline spec files (all *.json under otter_py/sample_specs).
+   *
+   * @returns {Promise<string[]>} Array of spec file names (e.g. ["default_spec.json", ...])
+   */
+  listSpecFiles: () =>
+    ipcRenderer.invoke("list-spec-files"),
+
+  /**
+   * Read a pipeline spec file from otter_py/sample_specs by name.
+   *
+   * @param {string} name - Spec filename (e.g. "default_spec.json")
+   * @returns {Promise<string>} The raw JSON text of the spec file
+   */
+  readSpecFile: (name) =>
+    ipcRenderer.invoke("read-spec-file", name),
+
+  /**
+   * Convenience: fetch the default pipeline spec text.
+   *
+   * @returns {Promise<string>}
+   */
+  readDefaultSpec: () =>
+    ipcRenderer.invoke("read-spec-file", "default_spec.json"),
+
 });

@@ -162,58 +162,104 @@ ipcMain.handle("probe-audio", async (event, inputPath) => {
  * @param {string} audioPath - Absolute path to the audio file to transcribe.
  * @returns {Promise<Object>} Parsed transcript JSON emitted by the python script.
  */
-ipcMain.handle("transcribe-audio", async (event, audioPath) => {
-  /**
-   * Choose the python interpreter for transcription:
-   *  - Prefer a project-local virtualenv at .venv/bin/python3
-   *  - Fall back to "python3" on PATH
-   */
+ipcMain.handle("transcribe-audio", async (event, audioPath, spec) => {
   function getPythonPath() {
     const venvPython = path.join(__dirname, ".venv", "bin", "python3");
     if (fs.existsSync(venvPython)) return venvPython;
-    return "python3"; // fallback
+    return "python3";
   }
 
-  const scriptPath = path.join(__dirname, "py", "transcribe.py");
+  // Run from the repo root so "python -m otter_py.transcribe" works.
+  const cwd = __dirname;
+
+  // Build argv for: python -m otter_py.transcribe run --audio ... --spec-...
+  const python = getPythonPath();
+  const argv = ["-m", "otter_py.transcribe", "run", "--audio", audioPath];
+
+  // Choose spec source
+  if (spec?.mode === "file") {
+    // All presets live here; only pass a filename from renderer for safety.
+    const specPath = path.join(__dirname, "otter_py", "sample_specs", spec.name);
+    argv.push("--spec-file", specPath);
+  } else if (spec?.mode === "json") {
+    argv.push("--spec-json", spec.jsonText);
+  } else {
+    // Default: use default_spec.json
+    const specPath = path.join(__dirname, "otter_py", "sample_specs", "default_spec.json");
+    argv.push("--spec-file", specPath);
+  }
+
+  // Optional: if you want meta sometimes
+  // argv.push("--emit-meta");
 
   return await new Promise((resolve, reject) => {
-    const python = getPythonPath();
-    const child = spawn(python, [scriptPath, audioPath], { cwd: __dirname });
+    const child = spawn(python, argv, { cwd });
 
     let stdout = "";
     let stderr = "";
 
-    // stdout carries the final JSON result (and may include other output)
     child.stdout.on("data", (d) => {
-      stdout += d.toString();
-      event.sender.send("transcribe-log", d.toString());
+      const s = d.toString();
+      stdout += s;
     });
 
-    // stderr carries progress/log messages; parse PROGRESS lines if present
     child.stderr.on("data", (d) => {
       const s = d.toString();
       stderr += s;
 
-      const m = s.match(/PROGRESS\s+(\d{1,3})/);
-      if (m) event.sender.send("transcribe-progress", Number(m[1]));
-      else event.sender.send("transcribe-log", s);
+      // Parse progress lines of the form "PROGRESS:NN"
+      // (Allow multiple lines in a single chunk.)
+      for (const line of s.split(/\r?\n/)) {
+        const m = line.match(/^PROGRESS:(\d{1,3})\s*$/);
+        if (m) event.sender.send("transcribe-progress", Number(m[1]));
+        else if (line.trim()) event.sender.send("transcribe-log", line + "\n");
+      }
     });
 
     child.on("error", reject);
 
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(`transcribe.py exited with ${code}\n${stderr}`));
+        reject(new Error(`transcribe exited with ${code}\n${stderr}`));
         return;
       }
       try {
         const parsed = JSON.parse(stdout);
         resolve(parsed);
       } catch (e) {
-        reject(new Error(`Failed to parse JSON from transcribe.py:\n${stdout}\n\n${stderr}`));
+        reject(new Error(`Failed to parse JSON from transcribe:\n${stdout}\n\n${stderr}`));
       }
     });
   });
+});
+
+
+ipcMain.handle("list-spec-files", async () => {
+  const dir = path.join(__dirname, "otter_py", "sample_specs");
+  const files = fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isFile() && d.name.toLowerCase().endsWith(".json"))
+    .map((d) => d.name)
+    .sort((a, b) => a.localeCompare(b));
+
+  return files;
+});
+
+ipcMain.handle("read-spec-file", async (_event, name) => {
+  const dir = path.join(__dirname, "otter_py", "sample_specs");
+
+  // Safety: prevent path traversal ("../../etc/passwd")
+  const safeName = path.basename(name);
+  if (safeName !== name) {
+    throw new Error("Invalid spec file name");
+  }
+
+  const fullPath = path.join(dir, safeName);
+  if (!fs.existsSync(fullPath)) {
+    throw new Error(`Spec file not found: ${safeName}`);
+  }
+
+  return fs.readFileSync(fullPath, "utf-8");
 });
 
 /**
@@ -271,3 +317,8 @@ ipcMain.handle("make-snippet", async (event, audioPath, startSec, durSec) => {
 
   return outPath;
 });
+
+
+
+
+

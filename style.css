@@ -1,69 +1,20 @@
-body { margin: 0; font-family: system-ui, -apple-system, sans-serif; }
+/* ============================================================================
+   Base / Layout
+   ========================================================================== */
 
-.title { font-weight: 700; margin-right: 8px; }
+html, body { height: 100%; }
 
-#status {
-  display: none;              /* hidden by default */
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 14px;
-  white-space: nowrap;
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+
+  display: flex;
+  flex-direction: column;
 }
 
-/* Status pill states used during transcription */
-#status.info    { background: #e5e7eb; color: #1f2937; }
-#status.working { background: #dbeafe; color: #1e40af; }
-#status.error   { background: #fee2e2; color: #991b1b; }
-#status.success { background: #dcfce7; color: #166534; }
-
-/* Main two-pane layout:
- *   left  = audio waveforms
- *   right = transcript text
- */
-main {
-  display: grid;
-  grid-template-columns: 1.1fr 0.9fr;
-  height: calc(100vh - 52px);
-}
-
-.wavePane { padding: 12px; border-right: 1px solid #ddd; }
-#waveform { height: 90; border: 1px solid #ddd; border-radius: 8px; }
-.transport { margin-top: 10px; display: flex; gap: 12px; align-items: center; }
-#waveDetailPane {
-  padding-top: 2em;
-  /* Region highlight color for the detail waveform.
-   * Read by renderer.js and passed to WaveSurfer regions.
-   */
-  --word-region-color: rgba(0, 200, 0, 0.35);
-}
-#waveDetail { height: 230; border: 1px solid #ddd; border-radius: 8px; }
-.wavePane {
-  
-}
-.textPane { padding: 12px; overflow: auto; }
-.paneTitle { margin: 10px 0 6px; font-weight: 650; }
-#transcript { line-height: 1.8; font-size: 16px; }
-
-/* Individual transcript words are interactive and act as
- * navigation controls for audio playback.
- */
-.word { cursor: pointer; padding: 1px 2px; border-radius: 4px; }
-.word:hover { background: #f1f1f1; }
-.word.active {
-  /* Currently playing or selected word */
-  background: #ffe08a;
-}
-
-#btnLoop.active {
-  background: #ffd966;
-  border-color: #e6b800;
-}
-
-#log {
-  background: #111; color: #ddd;
-  padding: 10px; border-radius: 8px;
-  max-height: 200px; overflow: auto;
-}
+/* ============================================================================
+   Header
+   ========================================================================== */
 
 header {
   display: flex;
@@ -73,6 +24,8 @@ header {
   border-bottom: 1px solid #ddd;
 }
 
+.title { font-weight: 700; margin-right: 8px; }
+
 .statusArea {
   margin-left: auto;
   display: flex;
@@ -80,27 +33,217 @@ header {
   gap: 10px;
 }
 
-#status {
-  font-size: 14px;
-  color: #444;
-}
-
 #transcribeProgress {
   width: 180px;
   height: 14px;
 }
 
-#logContainer {
+/* Status pill (hidden by default) */
+#status {
+  display: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+/* Status pill states */
+#status.info    { background: #e5e7eb; color: #1f2937; }
+#status.working { background: #dbeafe; color: #1e40af; }
+#status.error   { background: #fee2e2; color: #991b1b; }
+#status.success { background: #dcfce7; color: #166534; }
+
+/* ============================================================================
+   Main Two-Pane Layout
+   ========================================================================== */
+
+main {
+  flex: 1;
+  min-height: 0;                 /* allows panes to scroll inside */
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+}
+
+.wavePane, .textPane { min-width: 0; min-height: 0; }
+
+/* ============================================================================
+   Left Pane: Waveforms + Transports + Dev Panel
+   ========================================================================== */
+
+.wavePane {
+  padding: 12px;
+  border-right: 1px solid #ddd;
+
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+/* A waveform + its transport, kept visually tight */
+.waveBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Waveform containers */
+#waveform,
+#waveDetail {
+  height: 80px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+/* Detail pane variables */
+#waveDetailPane {
+  /* Region highlight color for the detail waveform.
+     Read by renderer.js and passed to WaveSurfer regions. */
+  --word-region-color: rgba(0, 200, 0, 0.35);
+}
+
+/* Transport rows */
+.transport {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* Transport groups (left / center / right) */
+.transportGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.transportGroup.center {
+  flex: 1;
+  justify-content: center;
+}
+
+.transportGroup.right {
+  justify-content: flex-end;
+}
+
+/* Detail time formatting */
+#detailTime {
+  font-variant-numeric: tabular-nums;
+}
+
+.wavePane hr {
+  width: 100%;
+  border: 0;
   border-top: 1px solid #ddd;
-  padding: 8px;
-  background: #f9fafb;
+  margin: 6px 0;   /* tweak to taste */
 }
 
-#btnPlay {
-  width: 36px;
-  height: 32px;
+/* ============================================================================
+   Right Pane: Transcript
+   ========================================================================== */
+
+.textPane {
+  padding: 12px;
+  overflow: auto;
+}
+
+.paneTitle {
+  margin: 10px 0 6px;
+  font-weight: 650;
+}
+
+#transcript {
+  line-height: 1.8;
   font-size: 16px;
-  line-height: 1;
-  padding: 0;
 }
 
+/* Transcript words */
+.word {
+  cursor: pointer;
+  padding: 1px 2px;
+  border-radius: 4px;
+}
+
+.word:hover { background: #f1f1f1; }
+
+.word.active {
+  background: #ffe08a;
+}
+
+/* ============================================================================
+   Developer Panel (bottom of left column)
+   ========================================================================== */
+
+.devPanel {
+  margin-top: auto;              /* push to bottom */
+  padding-top: 8px;
+}
+
+.devPanel summary {
+  cursor: pointer;
+  user-select: none;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fafafa;
+
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.devTitle { font-weight: 650; }
+.devHint  { color: #666; font-size: 12px; }
+
+.devBody {
+  margin-top: 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.devSectionTitle { font-weight: 650; margin-bottom: 6px; }
+
+.devRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.devRow label { font-size: 13px; color: #333; }
+.muted { color: #666; font-size: 12px; }
+
+/* Spec JSON editor */
+#specJson {
+  width: 100%;
+  height: 160px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  resize: vertical;
+}
+
+/* Logs */
+#log {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #0b0b0b;
+  color: #e8e8e8;
+  font-size: 12px;
+  line-height: 1.35;
+}
