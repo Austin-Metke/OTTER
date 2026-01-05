@@ -88,7 +88,24 @@ function setStatus(text, cls = "info") {
   statusEl.style.display = "inline-block";
 }
 
+function shortenFilenameMiddle(filename, maxLength = 40) {
+  if (filename.length <= maxLength) return filename;
 
+  const dot = filename.lastIndexOf('.');
+  const ext = dot !== -1 ? filename.slice(dot) : '';
+  const base = dot !== -1 ? filename.slice(0, dot) : filename;
+
+  const maxBase = maxLength - ext.length - 1;
+  const front = Math.ceil(maxBase / 2);
+  const back = Math.floor(maxBase / 2);
+
+  return (
+    base.slice(0, front) +
+    '…' +
+    base.slice(-back) +
+    ext
+  );
+}
 
 
 //==============================================================================
@@ -239,6 +256,7 @@ function renderTranscript(words) {
 const btnPlay = document.getElementById("btnPlay");
 const timeEl = document.getElementById("time");
 const progressEl = document.getElementById("transcribeProgress");
+const fnameEl = document.getElementById("loadedFile");
 
 // Switch between play and pause icons
 function setPlayIcon(isPlaying) {
@@ -524,7 +542,8 @@ btnChoose.addEventListener("click", async () => {
     return;
   }
 
-  setStatus(`Loaded: ${audioPath.split("/").pop()}`, "success");
+  let fname = audioPath.split("/").pop();
+  setStatus(`Loaded: ${fname}`, "success");
   setPlayIcon(false);
   btnTranscribe.disabled = false;
 
@@ -534,6 +553,9 @@ btnChoose.addEventListener("click", async () => {
   await ws.loadBlob(blob);
 
   btnPlay.disabled = false;
+
+  fnameEl.textContent = shortenFilenameMiddle(fname);
+  fnameSpan.title = fname;
 });
 
 

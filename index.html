@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>OTTER Read-only Prototype</title>
+    <title>OTTER Proof of Concept</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
@@ -30,9 +30,11 @@
               <button id="btnPlay" disabled aria-label="Play/Pause" title="Play/Pause">▶︎</button>
             </div>
             <div class="transportGroup center">
-              <span id="time"></span>
+              <span id="time" class="numericReadout">0.00</span>
             </div>
-            <div class="transportGroup right"></div>
+            <div class="transportGroup right">
+              <span id="loadedFile">No file loaded</span>
+            </div>
           </div>
         </div>
 
@@ -52,7 +54,7 @@
               </div>
 
               <div class="transportGroup center">
-                <span id="detailTime"></span>
+                <span class="numericReadout" id="detailTime"></span>
               </div>
 
               <div class="transportGroup right">
@@ -60,7 +62,7 @@
                 <button id="btnRegion" disabled
                         aria-label="Play Region"
                         title="Play Region">▷</button>
-                <span id="detailBounds">[— - —]</span>
+                <span id="detailBounds" class="numericReadout">[— - —]</span>
               </div>
             </div>
           </div>
@@ -104,7 +106,7 @@
 
       <!-- RIGHT COLUMN: Transcript only -->
       <section class="textPane">
-        <div class="paneTitle">Transcript (click a word to seek)</div>
+        <div class="paneTitle">Transcript</div>
         <div id="transcript"></div>
       </section>
     </main>

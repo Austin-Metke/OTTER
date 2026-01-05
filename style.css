@@ -102,33 +102,28 @@ main {
   --word-region-color: rgba(0, 200, 0, 0.35);
 }
 
-/* Transport rows */
-.transport {
-  display: flex;
-  gap: 12px;
+.transport{
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  column-gap: 12px;
   align-items: center;
 }
 
-/* Transport groups (left / center / right) */
-.transportGroup {
+.transportGroup{
+  min-width: 0;               /* allow shrinking inside grid cell */
   display: flex;
   align-items: center;
   gap: 8px;
-  white-space: nowrap;
   font-size: 12px;
+  white-space: nowrap;
 }
 
-.transportGroup.center {
-  flex: 1;
-  justify-content: center;
-}
+/* Align contents inside each third */
+.transportGroup.left   { justify-self: start; }
+.transportGroup.center { justify-self: center; }
+.transportGroup.right  { justify-self: end; }
 
-.transportGroup.right {
-  justify-content: flex-end;
-}
-
-/* Detail time formatting */
-#detailTime {
+.numericReadout {
   font-variant-numeric: tabular-nums;
 }
 
