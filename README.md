@@ -1,7 +1,7 @@
 # OTTER Read-Only Proof of Concept
 ***Open Text Transcription Editing Resource***
 
-<image src="assets/icon.png" width="35%"> <image src="assets/OTTER_UI.png" width="50%" align="right">
+<image src="assets/icon.png" width="35%"> <image src="assets/Screenshot1.png" width="50%" align="right">
 ## Overview
 
 This repository contains a Proof of Concept (PoC) for OTTER, the **O**pen **T**ext **T**ranscription **E**diting **R**esource. It is for use with CSUMB Computer Science Capstone Program.
@@ -47,6 +47,7 @@ The purpose of this application is to demonstrate:
 		+ Renderer (UI)
 		+ Preload (secure IPC boundary)
 	+ Local Whisper-based ASR
+	+ Flexible pipeline for transcription process
 
 ### What This Prototype Intentionally Does Not Do
 
@@ -126,14 +127,31 @@ Students are encouraged to explore broader format support (e.g., MP3, AAC, norma
 1.	Clicking a word in the transcript will:
   + Move the cursor in the main audio waveform
   + Display a detail view of the audio around that word
-1. Use the detail to fine-tune the mapping to the selected word
+1. Use the detail view to fine-tune the mapping to the selected word
+2. Developer Tools
+    + Use the Developer Tools to look at the log from the transcription pipeline
+	+ Select a pre-configured transcription pipeline or enter a custom specification.
+	+ If no explicit selection is made, a default pipeline will be used.
+	+ All pipelines are stored in `otter_py/sample_specs`. Any `json` file placed in that folder will be presented as a pipeline specification in the app
 
 ## Architectural Notes
 
-+ Transcript timing is treated as approximate, not sample-perfect.
-+ Minor timing nudges will be required for perceptually clean playback.
-+ This reflects real-world constraints of speech recognition systems.
-+ At the moment the transcript engine (whisper) is run via a python wrapper. The app communicates with it using [Electron IPC](https://www.electronjs.org/docs/latest/tutorial/ipc).
+### Transcription Pipeline
+
+The transcription pipleline consists of a primary transcription phase followed by zero or more post-processing steps which may improve accuracy of the transcript and / or alignment of the transcript to the audio. The pipleline can be configured by the Electron app, but runs in a separate python process. The app communicates with it using [Electron IPC](https://www.electronjs.org/docs/latest/tutorial/ipc).
+
+The app exposes a panel where developers can choose pre-existing pipeline configurations or enter a new one on the fly. This makes experimentation simpler and also allows developers to work in parallel on new pipeline components. The provided components are:
+
++ Transcription
+	+ **faster_whisper**: An implementation using the `faster-whisper` package. quite a few parameters may be set using the pipeline configuration with no code changes needed. For example, the model size may be changed.
+	+ **whisperx_vad**: An implementation using the `whisperx` package along with the `Silero` aligner. Again, many options may be specified including model size.
++ Post-processing
+	+ **clean_word_timings**:  Normalizes adjacent word boundaries to remove small overlaps and close tiny gaps.This improves selection/playback behavior by ensuring word boundaries are "tight" and consistent.
+	+ **adjust_short_words**: Heuristic pass that expands very short words by extending their start time leftward, without overlapping the previous word.
+
+Alternative transcription modules and post-processors may be designed, implemented, and added as options for the transcription pipeline.  For example, other post processors may analyze the audio waveform to look for clean separations between words to help align the transcript.
+
+Even with good transcription and post-processing, transcript timing is treated as approximate, not sample-perfect. Minor timing nudges may be required for perceptually clean playback. This reflects real-world constraints of speech recognition systems and learning the limits of this technology is part of the Capstone process.
 
 For more details on how the Electron PoC is organized, please see [Understanding Electron](doc/UnderstandingElectron.md) notes.
 

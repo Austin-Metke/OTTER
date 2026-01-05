@@ -52,6 +52,9 @@ snippets/
 # Transcription artifacts (generated during runs) — keep this scoped
 transcripts/
 
+# Backend sample output
+otter_py/tmp
+
 ###############################################################################
 # OS / Editor noise
 ###############################################################################

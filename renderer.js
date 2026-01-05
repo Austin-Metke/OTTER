@@ -42,25 +42,6 @@
  * as a conceptual foundation for a future capstone project.
  */
 
-//
-// UI elements
-//
-const btnChoose = document.getElementById("btnChoose");
-const btnTranscribe = document.getElementById("btnTranscribe");
-const btnPlay = document.getElementById("btnPlay");
-const transcriptEl = document.getElementById("transcript");
-const statusEl = document.getElementById("status");
-const progressEl = document.getElementById("transcribeProgress");
-const timeEl = document.getElementById("time");
-const logEl = document.getElementById("log");
-const btnToggleLog = document.getElementById("btnToggleLog");
-const logContainer = document.getElementById("logContainer");
-const btnDetailPlay = document.getElementById("btnDetailPlay");
-const waveDetailPane = document.getElementById("waveDetailPane");
-const detailTimeEl = document.getElementById("detailTime");
-const detailBounds = document.getElementById("detailBounds");
-const btnRegion = document.getElementById("btnRegion");
-const WaveSurfer = window.WaveSurfer;
 
 //
 // Constants
@@ -69,9 +50,12 @@ const SEEK_EPS = 0.01;
 const DETAIL_PAD_BEFORE = 0.25; // seconds
 const DETAIL_PAD_AFTER  = 0.25; // seconds
 
+
 //
 // Global State
 //
+const WaveSurfer = window.WaveSurfer;
+
 let audioPath = null;
 let words = [];
 
@@ -104,17 +88,7 @@ function setStatus(text, cls = "info") {
   statusEl.style.display = "inline-block";
 }
 
-//
-// Set initial state
-//
-setDetailPlayIcon(false);
-btnDetailPlay.disabled = true;
-btnRegion.disabled = true;
-const WORD_REGION_COLOR = getCssVar(
-  waveDetailPane,
-  "--word-region-color",
-  "rgba(255, 200, 0, 0.35)"
-);
+
 
 
 //==============================================================================
@@ -122,6 +96,11 @@ const WORD_REGION_COLOR = getCssVar(
 // BEGIN: Primary rendering logic
 //
 //==============================================================================
+
+const transcriptEl = document.getElementById("transcript");
+const btnChoose = document.getElementById("btnChoose");
+const btnTranscribe = document.getElementById("btnTranscribe");
+const statusEl = document.getElementById("status");
 
 /**
  * Update the visual "active" state of the transcript to reflect the
@@ -180,6 +159,7 @@ async function loadDetailForWord(start, end) {
 
   // Enable/show detail UI now that detail audio exists
   waveDetailPane.hidden = false;
+  document.getElementById("detailDivider").hidden = false;
   btnDetailPlay.disabled = false;
   btnRegion.disabled = false;
   setDetailPlayIcon(false);
@@ -256,6 +236,10 @@ function renderTranscript(words) {
 //
 //==============================================================================
 
+const btnPlay = document.getElementById("btnPlay");
+const timeEl = document.getElementById("time");
+const progressEl = document.getElementById("transcribeProgress");
+
 // Switch between play and pause icons
 function setPlayIcon(isPlaying) {
   btnPlay.textContent = isPlaying ? "⏸︎" : "▶︎";
@@ -318,13 +302,19 @@ ws.on("timeupdate", (t) => {
 //
 //==============================================================================
 
+const btnDetailPlay = document.getElementById("btnDetailPlay");
+const waveDetailPane = document.getElementById("waveDetailPane");
+const detailTimeEl = document.getElementById("detailTime");
+const detailBounds = document.getElementById("detailBounds");
+const btnRegion = document.getElementById("btnRegion");
+
 // Create a Regions plugin instance to manage editable time ranges
 const detailRegions = WaveSurfer.Regions.create();
 
 // Create the detail region visualization object
 const wsDetail = WaveSurfer.create({
   container: "#waveDetail",
-  height: 220,
+  height: 80,
   plugins: [detailRegions]
 });
 
@@ -504,18 +494,19 @@ btnTranscribe.addEventListener("click", async () => {
     btnChoose.disabled = true;
     btnTranscribe.disabled = true;
     progressEl.value = 0;
-    const result = await window.otter.transcribeAudio(audioPath);
-    words = result.words || [];
+    progressEl.hidden = false;
+
+    const result = await window.otter.transcribeAudio(audioPath, getActiveSpecArg());
+    words = Array.isArray(result) ? result : (result.words || []);
     setStatus(`Transcript ready (${words.length} words, lang=${result.language})`, "success");
     renderTranscript(words);
   } catch (e) {
     setStatus("Transcription failed (see logs).", "error");
     appendLog("\nERROR:\n" + (e?.message || String(e)) + "\n");
   } finally {
-    btnTranscribe.disabled = false;
-    progressEl.hidden = true;
     btnChoose.disabled = false;
     btnTranscribe.disabled = false;
+    progressEl.hidden = true;
   }
 });
 
@@ -552,6 +543,8 @@ btnChoose.addEventListener("click", async () => {
 //
 //==============================================================================
 
+const logEl = document.getElementById("log");
+
 // Add the message to the log area
 function appendLog(msg) {
   logEl.textContent += msg;
@@ -568,10 +561,145 @@ window.otter.onTranscribeProgress((pct) => {
   statusEl.textContent = "Transcribing…";
 });
 
-// Show/hide the log area based on a button press
-btnToggleLog.addEventListener("click", () => {
-  const showing = !logContainer.hasAttribute("hidden");
-  logContainer.toggleAttribute("hidden");
-  btnToggleLog.textContent = showing ? "Show Log" : "Hide Log";
+
+//==============================================================================
+//
+// BEGIN: Objects and code related to developer options
+//
+//==============================================================================
+
+const specSelect = document.getElementById("specSelect");
+const chkCustomSpec = document.getElementById("chkCustomSpec");
+const customSpecArea = document.getElementById("customSpecArea");
+const specJsonEl = document.getElementById("specJson");
+
+// State
+let activeSpecName = "default_spec.json";   // currently selected file
+let lastLoadedSpecText = "";                // baseline text loaded into textarea
+let suppressSpecChange = false;             // prevents recursion when reverting selection
+
+
+function hasUnsavedCustomEdits() {
+  // Only meaningful in customize mode
+  if (!chkCustomSpec.checked) return false;
+  return (specJsonEl.value || "") !== (lastLoadedSpecText || "");
+}
+
+async function loadSelectedSpecIntoTextarea() {
+  const name = specSelect.value || "default_spec.json";
+  const txt = await window.otter.readSpecFile(name);
+  specJsonEl.value = txt;
+  lastLoadedSpecText = txt;
+}
+
+function showCustomArea(show) {
+  customSpecArea.hidden = !show;
+}
+
+/**
+ * Spec argument passed to main.js when transcribing.
+ */
+function getActiveSpecArg() {
+  if (chkCustomSpec.checked) {
+    return { mode: "json", jsonText: specJsonEl.value || "" };
+  }
+  return { mode: "file", name: specSelect.value || "default_spec.json" };
+}
+
+async function populateSpecSelect() {
+  const files = await window.otter.listSpecFiles();
+
+  specSelect.innerHTML = "";
+  for (const f of files) {
+    const opt = document.createElement("option");
+    opt.value = f;
+    opt.textContent = f;
+    specSelect.appendChild(opt);
+  }
+
+  // Default selection
+  if (files.includes("default_spec.json")) {
+    specSelect.value = "default_spec.json";
+    activeSpecName = "default_spec.json";
+  } else if (files.length) {
+    specSelect.value = files[0];
+    activeSpecName = files[0];
+  }
+}
+
+// Events
+
+chkCustomSpec.addEventListener("change", async () => {
+  if (chkCustomSpec.checked) {
+    // Enter customize mode: show textarea and seed it from selected file
+    showCustomArea(true);
+    try {
+      await loadSelectedSpecIntoTextarea();
+    } catch (e) {
+      appendLog?.(`\nWARN: Failed to load spec for customization: ${e?.message || String(e)}\n`);
+    }
+  } else {
+    // Exit customize mode: hide textarea; spec comes from dropdown
+    showCustomArea(false);
+  }
 });
 
+specSelect.addEventListener("change", async () => {
+  if (suppressSpecChange) return;
+
+  const newName = specSelect.value;
+  const prevName = activeSpecName;
+
+  // If customizing and edits differ, confirm overwrite
+  if (chkCustomSpec.checked && hasUnsavedCustomEdits()) {
+    const ok = window.confirm(
+      "You have customized the JSON spec. Switching specs will overwrite your changes. Continue?"
+    );
+
+    if (!ok) {
+      // revert dropdown to previous selection
+      suppressSpecChange = true;
+      specSelect.value = prevName;
+      suppressSpecChange = false;
+      return;
+    }
+  }
+
+  // accept new selection
+  activeSpecName = newName;
+
+  // If customizing, reload textarea from newly selected spec file
+  if (chkCustomSpec.checked) {
+    try {
+      await loadSelectedSpecIntoTextarea();
+    } catch (e) {
+      appendLog?.(`\nWARN: Failed to load spec "${newName}": ${e?.message || String(e)}\n`);
+    }
+  }
+});
+
+// Init
+(async function initSpecUi() {
+  await populateSpecSelect();
+
+  // Start state: default selected, Customize unchecked, textarea hidden
+  chkCustomSpec.checked = false;
+  showCustomArea(false);
+})();
+
+//
+// Initialization
+//
+
+//
+// Set initial state
+//
+
+setDetailPlayIcon(false);
+btnDetailPlay.disabled = true;
+btnRegion.disabled = true;
+const WORD_REGION_COLOR = getCssVar(
+  waveDetailPane,
+  "--word-region-color",
+  "rgba(255, 200, 0, 0.35)"
+);

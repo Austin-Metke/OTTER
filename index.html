@@ -11,7 +11,7 @@
 
       <button id="btnChoose">Choose Audio…</button>
       <button id="btnTranscribe" disabled>Transcribe</button>
-      <button id="btnToggleLog">Show Log</button>
+
       <div class="statusArea">
         <div id="status"></div>
         <progress id="transcribeProgress" value="0" max="100" hidden></progress>
@@ -19,35 +19,93 @@
     </header>
 
     <main>
+      <!-- LEFT COLUMN: Waveforms + Dev Panel -->
       <section class="wavePane">
-        <div id="waveform"></div>
+        <div class="waveBlock">
+          <div id="waveform"></div>
 
-        <div class="transport">
-          <button id="btnPlay" disabled aria-label="Play/Pause" title="Play/Pause">▶︎</button>
-          <span id="time"></span>
-        </div>
-
-        <div id="waveDetailPane" hidden>
-          <hr>
-          <div id="waveDetail"></div>
-
-          <div class="transport" id="detailTransport">
-            <button id="btnDetailPlay" disabled aria-label="Play/Pause Detail" title="Play/Pause Detail">▶︎</button>
-            <button id="btnRegion" disabled aria-label="Play Region" title="Play Region">[▶]</button>
-            <span id="detailTime"></span>
-            <span id="detailBounds">[— - —]</span>
+          <div class="transport" id="primaryTransport">
+            <div class="transportGroup left">
+              <label>Play Track</label>
+              <button id="btnPlay" disabled aria-label="Play/Pause" title="Play/Pause">▶︎</button>
+            </div>
+            <div class="transportGroup center">
+              <span id="time"></span>
+            </div>
+            <div class="transportGroup right"></div>
           </div>
         </div>
+
+        <hr id="detailDivider" hidden>
+        
+        <div id="waveDetailPane" hidden>
+          <div class="waveBlock">
+
+            <div id="waveDetail"></div>
+
+            <div class="transport" id="detailTransport">
+              <div class="transportGroup left">
+                <label>Play Region</label>
+                <button id="btnDetailPlay" disabled
+                        aria-label="Play/Pause Detail"
+                        title="Play/Pause Detail">▶︎</button>
+              </div>
+
+              <div class="transportGroup center">
+                <span id="detailTime"></span>
+              </div>
+
+              <div class="transportGroup right">
+                <label>Play Selection</label>
+                <button id="btnRegion" disabled
+                        aria-label="Play Region"
+                        title="Play Region">▷</button>
+                <span id="detailBounds">[— - —]</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Developer Panel (collapsed by default) -->
+        <details id="devPanel" class="devPanel">
+          <summary>
+            <span class="devTitle">Developer Tools</span>
+            <span class="devHint">Transcription Pipeline</span>
+          </summary>
+
+          <div class="devBody">
+            <!-- Spec controls -->
+            <div class="devSection">
+              <div class="devSectionTitle">Transcription Pipeline</div>
+
+              <div class="devRow">
+                <label for="specSelect">Spec:</label>
+                <select id="specSelect"></select>
+
+                <label class="checkbox">
+                  <input type="checkbox" id="chkCustomSpec" />
+                  Customize
+                </label>
+              </div>
+
+              <div id="customSpecArea" hidden>
+                <textarea id="specJson" spellcheck="false"></textarea>
+              </div>
+            </div>
+
+            <!-- Transcription Log -->
+            <div class="devSection">
+              <div class="devSectionTitle">Transcription Log</div>
+              <pre id="log"></pre>
+            </div>
+          </div>
+        </details>
       </section>
 
+      <!-- RIGHT COLUMN: Transcript only -->
       <section class="textPane">
         <div class="paneTitle">Transcript (click a word to seek)</div>
         <div id="transcript"></div>
-
-        <div id="logContainer" hidden>
-          <div class="paneTitle">Logs</div>
-          <pre id="log"></pre>
-        </div>
       </section>
     </main>
 

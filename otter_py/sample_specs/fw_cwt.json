@@ -1,0 +1,18 @@
+{
+  "transcriber": {
+    "id": "faster_whisper",
+    "opts": {
+      "model": "small",
+      "device": "cpu",
+      "compute_type": "int8"
+    }
+  },
+  "postprocessors": [
+    {
+      "id": "clean_word_timings",
+      "opts": {
+        "tiny_gap_ms": 300.0
+      }
+    }
+  ]
+}

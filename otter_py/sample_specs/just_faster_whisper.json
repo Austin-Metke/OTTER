@@ -1,0 +1,11 @@
+{
+  "transcriber": {
+    "id": "faster_whisper",
+    "opts": {
+      "model": "small",
+      "device": "cpu",
+      "compute_type": "int8"
+    }
+  },
+  "postprocessors": []
+}
