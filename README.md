@@ -163,7 +163,9 @@ The provided components are:
 	+ **clean_word\_timings**:  Normalizes adjacent word boundaries to remove small overlaps and close tiny gaps.This improves selection/playback behavior by ensuring word boundaries are "tight" and consistent.
 	+ **adjust_short\_words**: Heuristic pass that expands very short words by extending their start time leftward, without overlapping the previous word.
 
-Additional transcription modules and post-processors may be designed, implemented, and added as options for the transcription pipeline.  For example, other post processors may analyze the audio waveform to look for clean separations between words to help align the transcript. Also, new collections of parameters will emerge from careful tuning of the pipeline. These specifications will be used in the production implementation to provide optimal transcription results.
+Additional transcription modules and post-processors may be designed, implemented, and added as options for the transcription pipeline.  For example, other post processors may analyze the audio waveform to look for clean separations between words to help align the transcript. Another example would be a new transcriber that supported whisper integrated with [MFA](https://montreal-forced-aligner.readthedocs.io/en/latest/index.html).
+
+Also, new collections of parameters will emerge from careful tuning of the pipeline. These specifications will be used in the production implementation to provide optimal transcription results.
 
 ## License
 
