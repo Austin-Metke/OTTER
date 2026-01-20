@@ -144,7 +144,7 @@ In this example we converted a format commonly produced by Apple devices into a 
 
 The system is broken into two primary components: the app and the thranscription pipeline. As discussed, the app uses Electron as its basis. Please see [Understanding Electron](doc/UnderstandingElectron.md) for more details on how the app is organized.
 
-The transcription pipeline is a separate process impolemented in Python. The app spins up the transcription pipeline as needed, and communicates with it using [Electron IPC](https://www.electronjs.org/docs/latest/tutorial/ipc).
+The transcription pipeline is a separate process implemented in Python. The app spins up the transcription pipeline as needed, and communicates with it using [Electron IPC](https://www.electronjs.org/docs/latest/tutorial/ipc).
 
 The app exposes a panel where developers can choose pre-existing pipeline configurations or enter a new one on the fly. This makes experimentation simpler and also allows developers to work in parallel on new pipeline components.
 
@@ -154,7 +154,7 @@ Even with good transcription and post-processing, transcript timing is treated a
 
 The transcription pipleline consists of a primary transcription step followed by zero or more post-processing steps which may improve accuracy of the transcript and / or alignment of the transcript to the audio. There is a collection of different transcribers and post-processors available and more will be added as part of the Capstone project. For a given run of the process, the transcription pipleline accepts a JSON structure that describes which transcription component to use and which post-processors to apply in which order. It also allows parameters for each to be specified.
 
-The provided components are:
+The following components are provided as part of the PoC:
 
 + Transcription
 	+ **faster_whisper**: An implementation using the `faster-whisper` package. quite a few parameters may be set using the pipeline configuration with no code changes needed. For example, the model size may be changed.
@@ -162,6 +162,36 @@ The provided components are:
 + Post-processing
 	+ **clean_word\_timings**:  Normalizes adjacent word boundaries to remove small overlaps and close tiny gaps.This improves selection/playback behavior by ensuring word boundaries are "tight" and consistent.
 	+ **adjust_short\_words**: Heuristic pass that expands very short words by extending their start time leftward, without overlapping the previous word.
+
+The following JSON structure illustrates a pipeline configuration that uses the `faster_whisper` transcriber followed by the `adjust_short_words` and `clean_word_timings` post-processors.
+
+```
+{
+  "transcriber": {
+    "id": "faster_whisper",
+    "opts": {
+      "model": "small",
+      "device": "cpu",
+      "compute_type": "int8"
+    }
+  },
+  "postprocessors": [
+    {
+      "id": "adjust_short_words",
+      "opts": {
+        "max_len": 0.30,
+        "min_extend": 0.10
+      }
+    },
+    {
+      "id": "clean_word_timings",
+      "opts": {
+        "tiny_gap_ms": 300.0
+      }
+    }
+  ]
+}
+```
 
 Additional transcription modules and post-processors may be designed, implemented, and added as options for the transcription pipeline.  For example, other post processors may analyze the audio waveform to look for clean separations between words to help align the transcript. Another example would be a new transcriber that supported whisper integrated with [MFA](https://montreal-forced-aligner.readthedocs.io/en/latest/index.html).
 
