@@ -88,6 +88,8 @@ In this example we converted a format commonly produced by Apple devices into a 
 + Python 3.10+
 + [Electron](https://www.electronjs.org)
 + [faster-whisper](https://pypi.org/project/faster-whisper/) for text transcription
++ [whisperx](https://pypi.org/project/whisperx/) for text transcription
++ [pydash](https://pypi.org/project/pydash/)
 + [FFmpeg](https://ffmpeg.org):
 	+ Used for audio inspection and (optionally) format normalization
 	+ Also used indirectly by waveform rendering and audio decoding
@@ -114,16 +116,26 @@ In this example we converted a format commonly produced by Apple devices into a 
 	```
 	python3 -m venv .venv
 	source .venv/bin/activate
+	pip install pydash
 	pip install faster-whisper
+	pip install whisperx
 	```
 
-3. Run the app
+3. Install `ffmpeg`
+
+   ```
+   # This is system dependent. For example, on the mac you can use homebrew:
+   brew install ffmpeg
+   ```
+   
+4. Run the app
+
+    **NOTE**: This PoC is not a cleanly packaged app, you must run it in a context where your python virtul environment is already active. Using the steps above in a shell/terminal will have that effect.
 
 	```
 	npm start
 	```
 
-**NOTE**: This PoC is not a cleanly packaged app, you must run it in a context where your python virtul environment is already active. Using the steps above in a shell/terminal will have that effect.
 
 ### Using the PoC
 
