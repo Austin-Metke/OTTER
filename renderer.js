@@ -13,7 +13,7 @@
  *   • Highlighting and playing a bounded audio region corresponding to a word
  *
  * This renderer intentionally treats the transcript as a *first-class interaction
- * surface*: clicking on text seeks the audio, and playback updates the active word.
+ * surface*: clicking on text seeks the audio, and playback updates the playhead word.
  *
  * Architectural Notes
  * -------------------
@@ -58,6 +58,10 @@ const WaveSurfer = window.WaveSurfer;
 
 let audioPath = null;
 let words = [];
+let selectionStart = null;
+let selectionEnd = null;
+let selectionAnchor = null;
+let playheadIndex = -1;
 
 //
 // Utility Functions
@@ -119,28 +123,53 @@ const btnChoose = document.getElementById("btnChoose");
 const btnTranscribe = document.getElementById("btnTranscribe");
 const statusEl = document.getElementById("status");
 
-/**
- * Update the visual "active" state of the transcript to reflect the
- * currently selected or playing word.
- *
- * This function removes the active highlight from any previously
- * highlighted word and applies it to the word at the specified index.
- * An index of -1 clears the highlight entirely.
- *
- * The transcript DOM uses a simple data-index attribute to associate
- * each rendered word span with its position in the transcript array.
- *
- * @param {number} idx - Index of the word to mark as active, or -1 to clear
- *                       the active selection.
- */
-function setActiveIndex(idx) {
-  const prev = transcriptEl.querySelector(".word.active");
-  if (prev) prev.classList.remove("active");
+function normalizeRange(a, b) {
+  if (a == null || b == null) return null;
+  return a <= b ? { start: a, end: b } : { start: b, end: a };
+}
 
+/**
+ * Update the visual "playhead" state to reflect the word currently
+ * under the audio playhead. This is independent from any text selection.
+ *
+ * @param {number} idx - Index of the word to mark as playhead, or -1 to clear.
+ */
+function setPlayheadIndex(idx) {
+  if (playheadIndex === idx) return;
+
+  const prev = transcriptEl.querySelector(".word.playhead");
+  if (prev) prev.classList.remove("playhead");
+
+  playheadIndex = idx;
   if (idx >= 0) {
     const el = transcriptEl.querySelector(`.word[data-index="${idx}"]`);
-    if (el) el.classList.add("active");
+    if (el) el.classList.add("playhead");
   }
+}
+
+/**
+ * Update the visual selection state for a range of words.
+ *
+ * @param {number|null} start - Start index, or null to clear selection.
+ * @param {number|null} end   - End index, or null to clear selection.
+ */
+function setSelectionRange(start, end) {
+  if (start == null || end == null) {
+    selectionStart = null;
+    selectionEnd = null;
+    selectionAnchor = null;
+  } else {
+    const range = normalizeRange(start, end);
+    selectionStart = range.start;
+    selectionEnd = range.end;
+  }
+
+  const nodes = transcriptEl.querySelectorAll(".word");
+  nodes.forEach((el) => {
+    const idx = Number(el.dataset.index);
+    const inRange = selectionStart != null && idx >= selectionStart && idx <= selectionEnd;
+    el.classList.toggle("selected", inRange);
+  });
 }
 
 
@@ -154,18 +183,18 @@ function computeDetailWindow(start, end) {
 }
 
 /**
- * Load/update the detail waveform for a selected word.
+ * Load/update the detail waveform for a selected range.
  *
  * Steps:
- *   1) Extract a short WAV snippet around the word using ffmpeg (via IPC).
+ *   1) Extract a short WAV snippet around the range using ffmpeg (via IPC).
  *   2) Load the snippet into the detail WaveSurfer instance.
- *   3) Create/update a region highlighting the word inside that snippet.
- *   4) Seek the detail playhead to the start of the word.
+ *   3) Create/update a region highlighting the range inside that snippet.
+ *   4) Seek the detail playhead to the start of the range.
  *
  * The detail view exists to demonstrate that ASR word boundaries are approximate
  * and that precise editing may require user refinement.
  */
-async function loadDetailForWord(start, end) {
+async function loadDetailForRange(start, end) {
   const { winStart, winDur } = computeDetailWindow(start, end);
 
   // Create a short WAV snippet around the selected word (main process uses ffmpeg)
@@ -181,14 +210,14 @@ async function loadDetailForWord(start, end) {
   btnRegion.disabled = false;
   setDetailPlayIcon(false);
 
-  // Map the word's absolute times into snippet-local times
-  const localWordStart = start - winStart;
-  const localWordEnd = end - winStart;
+  // Map the range's absolute times into snippet-local times
+  const localRangeStart = start - winStart;
+  const localRangeEnd = end - winStart;
 
   // Attach the handler BEFORE calling load() to avoid missing "ready" in fast loads
   wsDetail.once("ready", () => {
-    setDetailWordRegion(localWordStart, localWordEnd);
-    wsDetail.setTime(localWordStart);
+    setDetailWordRegion(localRangeStart, localRangeEnd);
+    wsDetail.setTime(localRangeStart);
   });
 
   await wsDetail.load(snippetPath);
@@ -201,7 +230,7 @@ async function loadDetailForWord(start, end) {
  * Each word is rendered as a <span> with a stable index that maps back
  * to the transcript data model. Clicking a word performs several actions:
  *
- *   • Marks the word as active in the transcript UI
+ *   • Marks the word as selected in the transcript UI
  *   • Seeks the main audio playback to the word's approximate start time
  *   • Loads a short, focused audio snippet into the detail waveform
  *     centered on the selected word
@@ -227,23 +256,46 @@ function renderTranscript(words) {
     span.textContent = w.word + " ";
     span.dataset.index = String(i);
 
-    span.addEventListener("click", async () => {
+    span.addEventListener("click", async (event) => {
       // Transcript click = select word + seek main audio
-      setActiveIndex(i);
+      if (event.shiftKey && selectionAnchor != null) {
+        setSelectionRange(selectionAnchor, i);
+      } else {
+        selectionAnchor = i;
+        setSelectionRange(i, i);
+      }
       ws.setTime(Number(w.start) + SEEK_EPS);
+      setPlayheadIndex(i);
 
-      // Load the detail waveform snippet centered on this word
-      const start = Number(w.start);
-      const end = Number(w.end);
+      // Load the detail waveform snippet centered on the selected range
+      const rangeStartIdx = selectionStart != null ? selectionStart : i;
+      const rangeEndIdx = selectionEnd != null ? selectionEnd : i;
+      const rangeStart = Number(words[rangeStartIdx].start);
+      const rangeEnd = Number(words[rangeEndIdx].end);
 
       try {
-        await loadDetailForWord(start, end);
+        await loadDetailForRange(rangeStart, rangeEnd);
       } catch (err) {
         console.error("Failed to load detail snippet:", err);
       }
     });
 
     transcriptEl.appendChild(span);
+  }
+
+  // Re-apply selection and playhead after re-render (e.g., new transcript)
+  if (selectionStart != null && selectionEnd != null) {
+    const maxIdx = words.length - 1;
+    if (selectionStart > maxIdx || selectionEnd > maxIdx) {
+      setSelectionRange(null, null);
+    } else {
+      setSelectionRange(selectionStart, selectionEnd);
+    }
+  }
+  if (playheadIndex >= 0 && playheadIndex < words.length) {
+    setPlayheadIndex(playheadIndex);
+  } else {
+    setPlayheadIndex(-1);
   }
 }
 
@@ -310,7 +362,7 @@ ws.on("timeupdate", (t) => {
   for (let i = 0; i < words.length; i++) {
     if (te >= words[i].start && te < words[i].end) { idx = i; break; }
   }
-  setActiveIndex(idx);
+  setPlayheadIndex(idx);
 });
 
 
