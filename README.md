@@ -147,6 +147,7 @@ In this example we converted a format commonly produced by Apple devices into a 
   + Display a detail view of the audio around the selected range (a single word by default)
 1. Shift-click extends the selection to create a range of words.
 1. Use the detail view to fine-tune the mapping to the selected range
+1. During playback, a separate playhead highlight moves word-by-word and does not change the selection.
 1. Developer Tools
     + Use the Developer Tools to look at the log from the transcription pipeline
 	+ Select a pre-configured transcription pipeline or enter a custom specification.
