@@ -144,9 +144,10 @@ In this example we converted a format commonly produced by Apple devices into a 
 1. Press Play in the main waveform area to hear audio starting at the cursor.
 1.	Clicking a word in the transcript will:
   + Move the cursor in the main audio waveform
-  + Display a detail view of the audio around that word
-1. Use the detail view to fine-tune the mapping to the selected word
-2. Developer Tools
+  + Display a detail view of the audio around the selected range (a single word by default)
+1. Shift-click extends the selection to create a range of words.
+1. Use the detail view to fine-tune the mapping to the selected range
+1. Developer Tools
     + Use the Developer Tools to look at the log from the transcription pipeline
 	+ Select a pre-configured transcription pipeline or enter a custom specification.
 	+ If no explicit selection is made, a default pipeline will be used.
@@ -216,4 +217,3 @@ This project is licensed under the [MIT License](LICENSE).
 You are free to use, modify, and distribute this project under the terms of the MIT license. See the [LICENSE](LICENSE) file for more details.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
