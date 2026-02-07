@@ -1,5 +1,5 @@
 /**
- * preload.js
+ * preload.ts
  *
  * OTTER Read-Only Prototype – Preload Script
  *
@@ -11,7 +11,7 @@
  * Architectural Role
  * ------------------
  * • Exposes a minimal, explicit API to the renderer via `window.otter`
- * • Prevents direct access to Node.js APIs from renderer.js
+ * • Prevents direct access to Node.js APIs from renderer.ts
  * • Enforces a clear separation between UI logic and system-level operations
  *
  * All filesystem access, process execution (ffmpeg, transcription), and
@@ -21,8 +21,8 @@
  * production application would safely structure renderer ↔ system boundaries.
  */
 
-const { contextBridge, ipcRenderer } = require("electron");
-const fs = require("fs");
+import { contextBridge, ipcRenderer } from "electron";
+import fs from "fs";
 
 /**
  * Read a file from disk and return its contents as an ArrayBuffer.
@@ -37,7 +37,7 @@ const fs = require("fs");
  * @param {string} filePath - Absolute path to the file on disk
  * @returns {Promise<ArrayBuffer>} File contents as an ArrayBuffer
  */
-function readFileAsArrayBuffer(filePath) {
+function readFileAsArrayBuffer(filePath: string): Promise<ArrayBuffer> {
   return new Promise((resolve, reject) => {
     fs.readFile(filePath, (err, buf) => {
       if (err) return reject(err);
@@ -58,7 +58,7 @@ function readFileAsArrayBuffer(filePath) {
  * The renderer may call these functions but cannot directly access
  * Node.js primitives, the filesystem, or child processes.
  *
- * Each function corresponds to a specific IPC request handled in main.js.
+ * Each function corresponds to a specific IPC request handled in main.ts.
  */
 contextBridge.exposeInMainWorld("otter", {
   /**
@@ -76,7 +76,7 @@ contextBridge.exposeInMainWorld("otter", {
    *
    * @returns {Promise<Object>} Transcript data including word-level timings
    */
-  transcribeAudio: (audioPath, spec) =>
+  transcribeAudio: (audioPath: string, spec?: { mode: "file"; name: string } | { mode: "json"; jsonText: string }) =>
     ipcRenderer.invoke("transcribe-audio", audioPath, spec),
 
   /**
@@ -87,7 +87,7 @@ contextBridge.exposeInMainWorld("otter", {
    *
    * @param {function(string): void} cb - Log message callback
    */
-  onTranscribeLog: (cb) =>
+  onTranscribeLog: (cb: (msg: string) => void) =>
     ipcRenderer.on("transcribe-log", (_, msg) => cb(msg)),
 
   /**
@@ -98,7 +98,7 @@ contextBridge.exposeInMainWorld("otter", {
    * @param {string} audioPath - Absolute path to the audio file
    * @returns {Promise<Object>} Audio metadata
    */
-  probeAudio: (audioPath) =>
+  probeAudio: (audioPath: string) =>
     ipcRenderer.invoke("probe-audio", audioPath),
 
   /**
@@ -108,7 +108,7 @@ contextBridge.exposeInMainWorld("otter", {
    *
    * @param {function(number): void} cb - Progress callback
    */
-  onTranscribeProgress: (cb) =>
+  onTranscribeProgress: (cb: (pct: number) => void) =>
     ipcRenderer.on("transcribe-progress", (_, pct) => cb(pct)),
 
   /**
@@ -121,7 +121,7 @@ contextBridge.exposeInMainWorld("otter", {
    * @param {number} durSec   - Duration in seconds
    * @returns {Promise<string>} Path to the generated snippet file
    */
-  makeSnippet: (audioPath, startSec, durSec) =>
+  makeSnippet: (audioPath: string, startSec: number, durSec: number) =>
     ipcRenderer.invoke("make-snippet", audioPath, startSec, durSec),
 
   /**
@@ -137,7 +137,7 @@ contextBridge.exposeInMainWorld("otter", {
    *
    * @returns {Promise<string[]>} Array of spec file names (e.g. ["default_spec.json", ...])
    */
-  listSpecFiles: () =>
+  listSpecFiles: (): Promise<string[]> =>
     ipcRenderer.invoke("list-spec-files"),
 
   /**
@@ -146,7 +146,7 @@ contextBridge.exposeInMainWorld("otter", {
    * @param {string} name - Spec filename (e.g. "default_spec.json")
    * @returns {Promise<string>} The raw JSON text of the spec file
    */
-  readSpecFile: (name) =>
+  readSpecFile: (name: string): Promise<string> =>
     ipcRenderer.invoke("read-spec-file", name),
 
   /**
@@ -154,7 +154,7 @@ contextBridge.exposeInMainWorld("otter", {
    *
    * @returns {Promise<string>}
    */
-  readDefaultSpec: () =>
+  readDefaultSpec: (): Promise<string> =>
     ipcRenderer.invoke("read-spec-file", "default_spec.json"),
 
 });

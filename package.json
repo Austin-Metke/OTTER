@@ -2,13 +2,24 @@
   "name": "otter-readonly-proto",
   "productName": "OTTER",
   "version": "0.1.0",
-  "main": "main.js",
+  "main": "dist/main.js",
   "private": true,
   "scripts": {
-    "start": "electron ."
+    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json",
+    "start": "npm run build && electron .",
+    "lint": "eslint src --ext .ts"
   },
   "dependencies": {
-    "electron": "^30.0.0",
+    "electron": "^35.7.5",
     "wavesurfer.js": "^7.8.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "globals": "^15.12.0",
+    "typescript": "^5.4.5"
   }
 }

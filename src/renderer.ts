@@ -1,5 +1,5 @@
 /**
- * renderer.js
+ * renderer.ts
  *
  * OTTER Read-Only Prototype – Renderer Process
  *
@@ -19,7 +19,7 @@
  * -------------------
  * • The renderer does NOT access the filesystem or spawn processes directly.
  *   All privileged operations (file selection, ffmpeg, transcription) are
- *   delegated to the main process via IPC exposed through preload.js.
+ *   delegated to the main process via IPC exposed through preload.ts.
  *
  * • Audio visualization and playback are handled by WaveSurfer.js.
  *   The Regions plugin is used in the detail view to visualize and adjust
@@ -43,6 +43,45 @@
  */
 
 
+type TranscriptWord = {
+  word: string;
+  start: number;
+  end: number;
+  [key: string]: unknown;
+};
+
+type TranscriptResult =
+  | TranscriptWord[]
+  | {
+      words: TranscriptWord[];
+      language?: string;
+      [key: string]: unknown;
+    };
+
+type TranscribeSpec =
+  | { mode: "file"; name: string }
+  | { mode: "json"; jsonText: string };
+
+type OtterApi = {
+  chooseAudioFile: () => Promise<string | null>;
+  transcribeAudio: (audioPath: string, spec?: TranscribeSpec) => Promise<TranscriptResult>;
+  onTranscribeLog: (cb: (msg: string) => void) => void;
+  probeAudio: (audioPath: string) => Promise<{ start_time: number; sample_rate: number | null }>;
+  onTranscribeProgress: (cb: (pct: number) => void) => void;
+  makeSnippet: (audioPath: string, startSec: number, durSec: number) => Promise<string>;
+  readFileAsArrayBuffer: (filePath: string) => Promise<ArrayBuffer>;
+  listSpecFiles: () => Promise<string[]>;
+  readSpecFile: (name: string) => Promise<string>;
+  readDefaultSpec: () => Promise<string>;
+};
+
+declare global {
+  interface Window {
+    WaveSurfer: any;
+    otter: OtterApi;
+  }
+}
+
 //
 // Constants
 //
@@ -54,32 +93,31 @@ const DETAIL_PAD_AFTER  = 0.25; // seconds
 //
 // Global State
 //
-const WaveSurfer = window.WaveSurfer;
+const WaveSurfer = window.WaveSurfer as any;
+const otter = window.otter;
 
-let audioPath = null;
-let words = [];
-let selectionStart = null;
-let selectionEnd = null;
-let selectionAnchor = null;
+let audioPath: string | null = null;
+let words: TranscriptWord[] = [];
+let selectionStart: number | null = null;
+let selectionEnd: number | null = null;
+let selectionAnchor: number | null = null;
 let playheadIndex = -1;
 
 //
 // Utility Functions
 //
-function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
-
-function getCssVar(el, name, fallback) {
+function getCssVar(el: HTMLElement | null, name: string, fallback: string) {
   if (!el) return fallback;
   const value = getComputedStyle(el).getPropertyValue(name).trim();
   return value || fallback;
 }
 
 // Format seconds as 0.00 (or choose your preferred format)
-function fmtSec(x) {
+function fmtSec(x: number) {
   return Number(x).toFixed(2);
 }
 
-function setStatus(text, cls = "info") {
+function setStatus(text: string, cls = "info") {
   if (!text) {
     statusEl.textContent = "";
     statusEl.className = "";
@@ -92,7 +130,7 @@ function setStatus(text, cls = "info") {
   statusEl.style.display = "inline-block";
 }
 
-function shortenFilenameMiddle(filename, maxLength = 40) {
+function shortenFilenameMiddle(filename: string, maxLength = 40) {
   if (filename.length <= maxLength) return filename;
 
   const dot = filename.lastIndexOf('.');
@@ -111,6 +149,12 @@ function shortenFilenameMiddle(filename, maxLength = 40) {
   );
 }
 
+function mustGetEl<T extends HTMLElement>(id: string): T {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`Missing required element: ${id}`);
+  return el as T;
+}
+
 
 //==============================================================================
 //
@@ -118,13 +162,12 @@ function shortenFilenameMiddle(filename, maxLength = 40) {
 //
 //==============================================================================
 
-const transcriptEl = document.getElementById("transcript");
-const btnChoose = document.getElementById("btnChoose");
-const btnTranscribe = document.getElementById("btnTranscribe");
-const statusEl = document.getElementById("status");
+const transcriptEl = mustGetEl<HTMLDivElement>("transcript");
+const btnChoose = mustGetEl<HTMLButtonElement>("btnChoose");
+const btnTranscribe = mustGetEl<HTMLButtonElement>("btnTranscribe");
+const statusEl = mustGetEl<HTMLDivElement>("status");
 
-function normalizeRange(a, b) {
-  if (a == null || b == null) return null;
+function normalizeRange(a: number, b: number) {
   return a <= b ? { start: a, end: b } : { start: b, end: a };
 }
 
@@ -134,7 +177,7 @@ function normalizeRange(a, b) {
  *
  * @param {number} idx - Index of the word to mark as playhead, or -1 to clear.
  */
-function setPlayheadIndex(idx) {
+function setPlayheadIndex(idx: number) {
   if (playheadIndex === idx) return;
 
   const prev = transcriptEl.querySelector(".word.playhead");
@@ -153,7 +196,7 @@ function setPlayheadIndex(idx) {
  * @param {number|null} start - Start index, or null to clear selection.
  * @param {number|null} end   - End index, or null to clear selection.
  */
-function setSelectionRange(start, end) {
+function setSelectionRange(start: number | null, end: number | null) {
   if (start == null || end == null) {
     selectionStart = null;
     selectionEnd = null;
@@ -164,10 +207,14 @@ function setSelectionRange(start, end) {
     selectionEnd = range.end;
   }
 
-  const nodes = transcriptEl.querySelectorAll(".word");
+  const nodes = transcriptEl.querySelectorAll<HTMLElement>(".word");
   nodes.forEach((el) => {
     const idx = Number(el.dataset.index);
-    const inRange = selectionStart != null && idx >= selectionStart && idx <= selectionEnd;
+    const inRange =
+      selectionStart != null &&
+      selectionEnd != null &&
+      idx >= selectionStart &&
+      idx <= selectionEnd;
     el.classList.toggle("selected", inRange);
   });
 }
@@ -175,7 +222,7 @@ function setSelectionRange(start, end) {
 
 // Compute a small snippet window around a word boundary.
 // This keeps the detail waveform focused on just the selected word plus context.
-function computeDetailWindow(start, end) {
+function computeDetailWindow(start: number, end: number) {
   const winStart = Math.max(0, start - DETAIL_PAD_BEFORE);
   const winEnd = Math.max(winStart + 0.05, end + DETAIL_PAD_AFTER); // enforce minimum duration
   detailWinStartAbs = winStart; // Remember where this detail starts in "absolute" time
@@ -194,18 +241,19 @@ function computeDetailWindow(start, end) {
  * The detail view exists to demonstrate that ASR word boundaries are approximate
  * and that precise editing may require user refinement.
  */
-async function loadDetailForRange(start, end) {
+async function loadDetailForRange(start: number, end: number) {
+  if (!audioPath) throw new Error("No audio loaded");
   const { winStart, winDur } = computeDetailWindow(start, end);
 
   // Create a short WAV snippet around the selected word (main process uses ffmpeg)
-  const snippetPath = await window.otter.makeSnippet(audioPath, winStart, winDur);
+  const snippetPath = await otter.makeSnippet(audioPath, winStart, winDur);
 
   // If the detail waveform is currently playing, stop it before swapping media
   if (wsDetail.isPlaying()) wsDetail.pause();
 
   // Enable/show detail UI now that detail audio exists
   waveDetailPane.hidden = false;
-  document.getElementById("detailDivider").hidden = false;
+  detailDivider.hidden = false;
   btnDetailPlay.disabled = false;
   btnRegion.disabled = false;
   setDetailPlayIcon(false);
@@ -245,7 +293,7 @@ async function loadDetailForRange(start, end) {
  * @param {Array<Object>} words - Transcript words with timing metadata
  *                                (each entry includes at least { word, start, end })
  */
-function renderTranscript(words) {
+function renderTranscript(words: TranscriptWord[]) {
   transcriptEl.innerHTML = "";
 
   for (let i = 0; i < words.length; i++) {
@@ -256,7 +304,7 @@ function renderTranscript(words) {
     span.textContent = w.word + " ";
     span.dataset.index = String(i);
 
-    span.addEventListener("click", async (event) => {
+    span.addEventListener("click", async (event: MouseEvent) => {
       // Transcript click = select word + seek main audio
       if (event.shiftKey && selectionAnchor != null) {
         setSelectionRange(selectionAnchor, i);
@@ -275,7 +323,7 @@ function renderTranscript(words) {
 
       try {
         await loadDetailForRange(rangeStart, rangeEnd);
-      } catch (err) {
+      } catch (err: unknown) {
         console.error("Failed to load detail snippet:", err);
       }
     });
@@ -305,13 +353,13 @@ function renderTranscript(words) {
 //
 //==============================================================================
 
-const btnPlay = document.getElementById("btnPlay");
-const timeEl = document.getElementById("time");
-const progressEl = document.getElementById("transcribeProgress");
-const fnameEl = document.getElementById("loadedFile");
+const btnPlay = mustGetEl<HTMLButtonElement>("btnPlay");
+const timeEl = mustGetEl<HTMLSpanElement>("time");
+const progressEl = mustGetEl<HTMLProgressElement>("transcribeProgress");
+const fnameEl = mustGetEl<HTMLSpanElement>("loadedFile");
 
 // Switch between play and pause icons
-function setPlayIcon(isPlaying) {
+function setPlayIcon(isPlaying: boolean) {
   btnPlay.textContent = isPlaying ? "⏸︎" : "▶︎";
   btnPlay.title = isPlaying ? "Pause" : "Play";
   btnPlay.setAttribute("aria-label", isPlaying ? "Pause" : "Play");
@@ -336,7 +384,7 @@ btnPlay.addEventListener("click", () => {
 
 
 // Highlight the current word based on playback time.
-ws.on("timeupdate", (t) => {
+ws.on("timeupdate", (t: number) => {
   timeEl.textContent = `${t.toFixed(2)}s`;
   const te = t + 0.01; // 10ms bias
 
@@ -372,11 +420,12 @@ ws.on("timeupdate", (t) => {
 //
 //==============================================================================
 
-const btnDetailPlay = document.getElementById("btnDetailPlay");
-const waveDetailPane = document.getElementById("waveDetailPane");
-const detailTimeEl = document.getElementById("detailTime");
-const detailBounds = document.getElementById("detailBounds");
-const btnRegion = document.getElementById("btnRegion");
+const btnDetailPlay = mustGetEl<HTMLButtonElement>("btnDetailPlay");
+const waveDetailPane = mustGetEl<HTMLDivElement>("waveDetailPane");
+const detailDivider = mustGetEl<HTMLHRElement>("detailDivider");
+const detailTimeEl = mustGetEl<HTMLSpanElement>("detailTime");
+const detailBounds = mustGetEl<HTMLSpanElement>("detailBounds");
+const btnRegion = mustGetEl<HTMLButtonElement>("btnRegion");
 
 // Create a Regions plugin instance to manage editable time ranges
 const detailRegions = WaveSurfer.Regions.create();
@@ -390,8 +439,6 @@ const wsDetail = WaveSurfer.create({
 
 // Update the UI element showing absolute bounds of the selected region
 function updateDetailBounds() {
-  if (!detailBounds) return;
-
   if (!detailRegion) {
     detailBounds.textContent = "[— - —]";
     return;
@@ -420,7 +467,7 @@ function updateDetailBounds() {
  * @param {number} localEnd   - End time of the word, in seconds, relative
  *                              to the beginning of the detail waveform.
  */
-function setDetailWordRegion(localStart, localEnd) {
+function setDetailWordRegion(localStart: number, localEnd: number) {
   // remove previous highlight
   if (detailRegion) {
     detailRegion.remove();
@@ -477,8 +524,8 @@ function setDetailWordRegion(localStart, localEnd) {
  * -----------------------------------------------------------------------------
  */
 
-let regionStopTimer = null;
-let detailRegion = null;
+let regionStopTimer: ReturnType<typeof setTimeout> | null = null;
+let detailRegion: any = null;
 // Absolute start time (seconds) of the currently-loaded detail snippet
 let detailWinStartAbs = 0;
 
@@ -513,11 +560,9 @@ btnRegion.onclick = () => {
 // Update the time readout for the detail waveform during playback.
 // This reflects the current playhead position within the snippet,
 // not the absolute time in the source audio.
-wsDetail.on("timeupdate", (t) => {
-  if (detailTimeEl) {
-    let absT = t + detailWinStartAbs;
-    detailTimeEl.textContent = `${absT.toFixed(2)}s`;
-  }
+wsDetail.on("timeupdate", (t: number) => {
+  let absT = t + detailWinStartAbs;
+  detailTimeEl.textContent = `${absT.toFixed(2)}s`;
 });
 
 // Keep the Play Region button in sync with the status of region playback
@@ -540,7 +585,7 @@ btnDetailPlay.onclick = () => {
 };
 
 // Adjust the icon in the "Play Detail" button
-function setDetailPlayIcon(isPlaying) {
+function setDetailPlayIcon(isPlaying: boolean) {
   btnDetailPlay.textContent = isPlaying ? "⏸︎" : "▶︎";
   btnDetailPlay.title = isPlaying ? "Pause Detail" : "Play Detail";
   btnDetailPlay.setAttribute("aria-label", isPlaying ? "Pause Detail" : "Play Detail");
@@ -566,13 +611,16 @@ btnTranscribe.addEventListener("click", async () => {
     progressEl.value = 0;
     progressEl.hidden = false;
 
-    const result = await window.otter.transcribeAudio(audioPath, getActiveSpecArg());
+    const result = await otter.transcribeAudio(audioPath, getActiveSpecArg());
     words = Array.isArray(result) ? result : (result.words || []);
-    setStatus(`Transcript ready (${words.length} words, lang=${result.language})`, "success");
+    const lang = Array.isArray(result) ? undefined : result.language;
+    const langSuffix = lang ? `, lang=${lang}` : "";
+    setStatus(`Transcript ready (${words.length} words${langSuffix})`, "success");
     renderTranscript(words);
-  } catch (e) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
     setStatus("Transcription failed (see logs).", "error");
-    appendLog("\nERROR:\n" + (e?.message || String(e)) + "\n");
+    appendLog("\nERROR:\n" + msg + "\n");
   } finally {
     btnChoose.disabled = false;
     btnTranscribe.disabled = false;
@@ -586,7 +634,7 @@ btnChoose.addEventListener("click", async () => {
   logEl.textContent = "";
   setStatus("Choosing file…", "info");
 
-  audioPath = await window.otter.chooseAudioFile();
+  audioPath = await otter.chooseAudioFile();
   if (!audioPath) {
     setStatus("No file selected.", "error");
     btnTranscribe.disabled = true;
@@ -595,13 +643,13 @@ btnChoose.addEventListener("click", async () => {
   }
 
   btnPlay.disabled = true;
-  let fname = audioPath.split("/").pop();
+  let fname = audioPath.split("/").pop() ?? audioPath;
   setStatus(`Loaded: ${fname}`, "success");
   setPlayIcon(false);
   btnTranscribe.disabled = false;
 
   // Load waveform from local file bytes via preload bridge
-  const ab = await window.otter.readFileAsArrayBuffer(audioPath);
+  const ab = await otter.readFileAsArrayBuffer(audioPath);
   const blob = new Blob([ab]);
   await ws.loadBlob(blob);
 
@@ -617,19 +665,19 @@ btnChoose.addEventListener("click", async () => {
 //
 //==============================================================================
 
-const logEl = document.getElementById("log");
+const logEl = mustGetEl<HTMLPreElement>("log");
 
 // Add the message to the log area
-function appendLog(msg) {
+function appendLog(msg: string) {
   logEl.textContent += msg;
   logEl.scrollTop = logEl.scrollHeight;
 }
 
 // We've received a normal log message
-window.otter.onTranscribeLog((msg) => appendLog(msg));
+otter.onTranscribeLog((msg: string) => appendLog(msg));
 
 // We've received a progress report from the transcirption engine
-window.otter.onTranscribeProgress((pct) => {
+otter.onTranscribeProgress((pct: number) => {
   progressEl.value = pct;
   progressEl.hidden = false;
   statusEl.textContent = "Transcribing…";
@@ -642,10 +690,10 @@ window.otter.onTranscribeProgress((pct) => {
 //
 //==============================================================================
 
-const specSelect = document.getElementById("specSelect");
-const chkCustomSpec = document.getElementById("chkCustomSpec");
-const customSpecArea = document.getElementById("customSpecArea");
-const specJsonEl = document.getElementById("specJson");
+const specSelect = mustGetEl<HTMLSelectElement>("specSelect");
+const chkCustomSpec = mustGetEl<HTMLInputElement>("chkCustomSpec");
+const customSpecArea = mustGetEl<HTMLDivElement>("customSpecArea");
+const specJsonEl = mustGetEl<HTMLTextAreaElement>("specJson");
 
 // State
 let activeSpecName = "default_spec.json";   // currently selected file
@@ -661,19 +709,19 @@ function hasUnsavedCustomEdits() {
 
 async function loadSelectedSpecIntoTextarea() {
   const name = specSelect.value || "default_spec.json";
-  const txt = await window.otter.readSpecFile(name);
+  const txt = await otter.readSpecFile(name);
   specJsonEl.value = txt;
   lastLoadedSpecText = txt;
 }
 
-function showCustomArea(show) {
+function showCustomArea(show: boolean) {
   customSpecArea.hidden = !show;
 }
 
 /**
- * Spec argument passed to main.js when transcribing.
+ * Spec argument passed to main.ts when transcribing.
  */
-function getActiveSpecArg() {
+function getActiveSpecArg(): TranscribeSpec {
   if (chkCustomSpec.checked) {
     return { mode: "json", jsonText: specJsonEl.value || "" };
   }
@@ -681,7 +729,7 @@ function getActiveSpecArg() {
 }
 
 async function populateSpecSelect() {
-  const files = await window.otter.listSpecFiles();
+  const files = await otter.listSpecFiles();
 
   specSelect.innerHTML = "";
   for (const f of files) {
@@ -709,8 +757,9 @@ chkCustomSpec.addEventListener("change", async () => {
     showCustomArea(true);
     try {
       await loadSelectedSpecIntoTextarea();
-    } catch (e) {
-      appendLog?.(`\nWARN: Failed to load spec for customization: ${e?.message || String(e)}\n`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      appendLog(`\nWARN: Failed to load spec for customization: ${msg}\n`);
     }
   } else {
     // Exit customize mode: hide textarea; spec comes from dropdown
@@ -746,8 +795,9 @@ specSelect.addEventListener("change", async () => {
   if (chkCustomSpec.checked) {
     try {
       await loadSelectedSpecIntoTextarea();
-    } catch (e) {
-      appendLog?.(`\nWARN: Failed to load spec "${newName}": ${e?.message || String(e)}\n`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      appendLog(`\nWARN: Failed to load spec "${newName}": ${msg}\n`);
     }
   }
 });
@@ -760,6 +810,8 @@ specSelect.addEventListener("change", async () => {
   chkCustomSpec.checked = false;
   showCustomArea(false);
 })();
+
+export {};
 
 //
 // Initialization

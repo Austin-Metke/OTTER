@@ -1,11 +1,11 @@
 /**
- * main.js
+ * main.ts
  *
  * OTTER Read-Only Prototype – Main Process
  *
  * This file runs in Electron’s main process and owns all privileged / OS-level
  * operations for the prototype. The renderer (UI) never accesses Node.js APIs
- * directly; instead, it calls a small set of IPC endpoints exposed by preload.js,
+ * directly; instead, it calls a small set of IPC endpoints exposed by preload.ts,
  * which are implemented here.
  *
  * Responsibilities
@@ -30,12 +30,17 @@
  * (macOS apps normally remain running with zero windows.)
  */
 
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
-const path = require("path");
-const fs = require("fs");
-const { spawn } = require("child_process");
+import { app, BrowserWindow, dialog, ipcMain, IpcMainInvokeEvent, OpenDialogOptions } from "electron";
+import path from "path";
+import fs from "fs";
+import { spawn } from "child_process";
 
-let win;
+type TranscribeSpec =
+  | { mode: "file"; name: string }
+  | { mode: "json"; jsonText: string };
+
+let win: BrowserWindow | null = null;
+const repoRoot = path.join(__dirname, "..");
 
 /**
  * Create the main application window and load the UI.
@@ -47,7 +52,7 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1200,
     height: 800,
-    icon: path.join(__dirname, "assets", "icon.png"),
+    icon: path.join(repoRoot, "assets", "icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -56,7 +61,7 @@ function createWindow() {
     }
   });
 
-  win.loadFile("index.html");
+  win.loadFile(path.join(repoRoot, "index.html"));
 }
 
 /**
@@ -66,7 +71,7 @@ function createWindow() {
  */
 app.whenReady().then(() => {
   createWindow();
-  app.dock.setIcon(path.join(__dirname, "assets", "icon.png"));
+  app.dock?.setIcon(path.join(repoRoot, "assets", "icon.png"));
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -88,14 +93,18 @@ app.on("window-all-closed", () => {
  * @returns {Promise<string|null>} Absolute path to the chosen file, or null if canceled.
  */
 ipcMain.handle("choose-audio-file", async () => {
-  const result = await dialog.showOpenDialog(win, {
+  const options: OpenDialogOptions = {
     title: "Choose an audio file",
     properties: ["openFile"],
     filters: [
       { name: "Audio", extensions: ["wav"] },
       { name: "All Files", extensions: ["*"] }
     ]
-  });
+  };
+
+  const result = win
+    ? await dialog.showOpenDialog(win, options)
+    : await dialog.showOpenDialog(options);
 
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
@@ -113,7 +122,7 @@ ipcMain.handle("choose-audio-file", async () => {
  * @param {string} inputPath - Absolute path to the input audio file.
  * @returns {Promise<{start_time:number, sample_rate:(number|null)}>}
  */
-ipcMain.handle("probe-audio", async (event, inputPath) => {
+ipcMain.handle("probe-audio", async (_event: IpcMainInvokeEvent, inputPath: string) => {
   const args = [
     "-v", "error",
     "-select_streams", "a:0",
@@ -129,7 +138,7 @@ ipcMain.handle("probe-audio", async (event, inputPath) => {
     child.stdout.on("data", d => out += d.toString());
     child.stderr.on("data", d => err += d.toString());
     child.on("error", reject);
-    child.on("close", code => {
+    child.on("close", (code) => {
       if (code !== 0) return reject(new Error(`ffprobe failed (${code})\n${err}`));
       try {
         const json = JSON.parse(out);
@@ -162,15 +171,21 @@ ipcMain.handle("probe-audio", async (event, inputPath) => {
  * @param {string} audioPath - Absolute path to the audio file to transcribe.
  * @returns {Promise<Object>} Parsed transcript JSON emitted by the python script.
  */
-ipcMain.handle("transcribe-audio", async (event, audioPath, spec) => {
+ipcMain.handle(
+  "transcribe-audio",
+  async (
+    event: IpcMainInvokeEvent,
+    audioPath: string,
+    spec?: TranscribeSpec
+  ) => {
   function getPythonPath() {
-    const venvPython = path.join(__dirname, ".venv", "bin", "python3");
+    const venvPython = path.join(repoRoot, ".venv", "bin", "python3");
     if (fs.existsSync(venvPython)) return venvPython;
     return "python3";
   }
 
   // Run from the repo root so "python -m otter_py.transcribe" works.
-  const cwd = __dirname;
+  const cwd = repoRoot;
 
   // Build argv for: python -m otter_py.transcribe run --audio ... --spec-...
   const python = getPythonPath();
@@ -179,13 +194,13 @@ ipcMain.handle("transcribe-audio", async (event, audioPath, spec) => {
   // Choose spec source
   if (spec?.mode === "file") {
     // All presets live here; only pass a filename from renderer for safety.
-    const specPath = path.join(__dirname, "otter_py", "sample_specs", spec.name);
+    const specPath = path.join(repoRoot, "otter_py", "sample_specs", spec.name);
     argv.push("--spec-file", specPath);
   } else if (spec?.mode === "json") {
     argv.push("--spec-json", spec.jsonText);
   } else {
     // Default: use default_spec.json
-    const specPath = path.join(__dirname, "otter_py", "sample_specs", "default_spec.json");
+    const specPath = path.join(repoRoot, "otter_py", "sample_specs", "default_spec.json");
     argv.push("--spec-file", specPath);
   }
 
@@ -198,12 +213,12 @@ ipcMain.handle("transcribe-audio", async (event, audioPath, spec) => {
     let stdout = "";
     let stderr = "";
 
-    child.stdout.on("data", (d) => {
+    child.stdout.on("data", (d: Buffer) => {
       const s = d.toString();
       stdout += s;
     });
 
-    child.stderr.on("data", (d) => {
+    child.stderr.on("data", (d: Buffer) => {
       const s = d.toString();
       stderr += s;
 
@@ -226,8 +241,9 @@ ipcMain.handle("transcribe-audio", async (event, audioPath, spec) => {
       try {
         const parsed = JSON.parse(stdout);
         resolve(parsed);
-      } catch (e) {
-        reject(new Error(`Failed to parse JSON from transcribe:\n${stdout}\n\n${stderr}`));
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        reject(new Error(`Failed to parse JSON from transcribe:\n${stdout}\n\n${stderr}\n${msg}`));
       }
     });
   });
@@ -235,7 +251,7 @@ ipcMain.handle("transcribe-audio", async (event, audioPath, spec) => {
 
 
 ipcMain.handle("list-spec-files", async () => {
-  const dir = path.join(__dirname, "otter_py", "sample_specs");
+  const dir = path.join(repoRoot, "otter_py", "sample_specs");
   const files = fs
     .readdirSync(dir, { withFileTypes: true })
     .filter((d) => d.isFile() && d.name.toLowerCase().endsWith(".json"))
@@ -245,8 +261,8 @@ ipcMain.handle("list-spec-files", async () => {
   return files;
 });
 
-ipcMain.handle("read-spec-file", async (_event, name) => {
-  const dir = path.join(__dirname, "otter_py", "sample_specs");
+ipcMain.handle("read-spec-file", async (_event: IpcMainInvokeEvent, name: string) => {
+  const dir = path.join(repoRoot, "otter_py", "sample_specs");
 
   // Safety: prevent path traversal ("../../etc/passwd")
   const safeName = path.basename(name);
@@ -277,7 +293,14 @@ ipcMain.handle("read-spec-file", async (_event, name) => {
  * @param {number} durSec    - Snippet duration (seconds)
  * @returns {Promise<string>} Absolute path to the generated snippet WAV
  */
-ipcMain.handle("make-snippet", async (event, audioPath, startSec, durSec) => {
+ipcMain.handle(
+  "make-snippet",
+  async (
+    _event: IpcMainInvokeEvent,
+    audioPath: string,
+    startSec: number,
+    durSec: number
+  ) => {
   // Store snippets in a temp-ish folder that exists for packaged/dev
   const outDir = path.join(app.getPath("userData"), "snippets");
   fs.mkdirSync(outDir, { recursive: true });
@@ -303,11 +326,11 @@ ipcMain.handle("make-snippet", async (event, audioPath, startSec, durSec) => {
     outPath
   ];
 
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const child = spawn("ffmpeg", args);
 
     let err = "";
-    child.stderr.on("data", d => err += d.toString());
+    child.stderr.on("data", (d: Buffer) => err += d.toString());
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) resolve();
@@ -317,8 +340,3 @@ ipcMain.handle("make-snippet", async (event, audioPath, startSec, durSec) => {
 
   return outPath;
 });
-
-
-
-
-

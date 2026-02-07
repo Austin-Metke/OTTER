@@ -60,7 +60,18 @@ To keep the focus clear, this prototype does not attempt to:
 + Package into a self-contained application
 + Provide a polished end-user experience
 
-These are deliberate omissions and are appropriate topics for the full capstone project.
+These are deliberate omissions and are appropriate topics for the full capstone project. The Capstone Proposal can be found here: [doc/OTTER Proposal v1](OTTER\ Proposal.pdf). 
+
+### Languages
+
+The PoC app is written in TypeScript and runs in Electron, while the transcription pipeline is written in Python.
+
+Key details:
+
++ TypeScript sources live in `src/` and compile to `dist/` during `npm start`.
++ The Electron main and preload scripts compile to CommonJS (Node context).
++ The renderer compiles to ES modules (browser context) to avoid `exports`/`require` issues.
++ The Python pipeline runs as a separate process and communicates with Electron over IPC.
 
 ### Supported Audio Format
 
@@ -94,6 +105,8 @@ In this example we converted a format commonly produced by Apple devices into a 
 	+ Used for audio inspection and (optionally) format normalization
 	+ Also used indirectly by waveform rendering and audio decoding
 	+ Must be available on the system PATH
+
+**Security note:** Electron is pinned to `^35.7.5` to address a moderate security advisory affecting earlier versions. Newer versions may be used at the discretion of the Capstone team.
 
 
 ### Installation & Running
@@ -136,6 +149,8 @@ In this example we converted a format commonly produced by Apple devices into a 
 	npm start
 	```
 
+    The `npm start` command compiles the TypeScript sources into `dist/` before launching Electron.
+
 
 ### Using the PoC
 
@@ -157,6 +172,9 @@ In this example we converted a format commonly produced by Apple devices into a 
 ## Architectural Notes
 
 The system is broken into two primary components: the app and the thranscription pipeline. As discussed, the app uses Electron as its basis. Please see [Understanding Electron](doc/UnderstandingElectron.md) for more details on how the app is organized.
+
+The Electron sources are written in TypeScript under `src/` and compiled to `dist/` during `npm start`.
+Main and preload compile to CommonJS (Node context), while the renderer compiles to ES modules (browser context). This avoids `exports`/`require` issues in the renderer.
 
 The transcription pipeline is a separate process implemented in Python. The app spins up the transcription pipeline as needed, and communicates with it using [Electron IPC](https://www.electronjs.org/docs/latest/tutorial/ipc).
 
@@ -210,6 +228,30 @@ The following JSON structure illustrates a pipeline configuration that uses the 
 Additional transcription modules and post-processors may be designed, implemented, and added as options for the transcription pipeline.  For example, other post processors may analyze the audio waveform to look for clean separations between words to help align the transcript. Another example would be a new transcriber that supported whisper integrated with [MFA](https://montreal-forced-aligner.readthedocs.io/en/latest/index.html).
 
 Also, new collections of parameters will emerge from careful tuning of the pipeline. These specifications will be used in the production implementation to provide optimal transcription results.
+
+## TypeScript Context
+
+TypeScript is a superset of JavaScript. That means every valid JavaScript program is valid TypeScript, but TypeScript adds static types and tooling that can catch mistakes before you run the code.
+
+Why we use TypeScript here:
+
++ It makes the code easier to understand and refactor as the project grows.
++ It catches common errors (wrong property names, wrong argument types) at compile time.
++ It improves editor tooling (autocomplete, go-to-definition, inline documentation).
+
+Special considerations for Electron in this project:
+
++ Conversion choices we made:
++ We use `strict: true` so TypeScript is a strong correctness tool, not just a hint system.
++ We compile main + preload to CommonJS because they run in the Node/Electron context.
++ We compile the renderer to ES modules because it runs in the browser context.
++ We use ESLint to keep style consistent and catch common mistakes early.
+
++ Electron has two different runtime contexts: the main/preload scripts run in Node, while the renderer runs in the browser. We compile main + preload to CommonJS and the renderer to ES modules to match those environments.
++ The renderer should not import Node modules directly. Instead, it talks to the main process through `window.otter` (the preload bridge).
++ TypeScript types for `window.otter` are declared in the renderer so the browser code knows what APIs exist.
++ `npm start` compiles the TypeScript sources into `dist/` before launching Electron, so changes in `src/` must be recompiled to take effect.
++ ESLint is configured to help catch mistakes and keep code style consistent; you can run `npm run lint` to check for issues.
 
 ## License
 

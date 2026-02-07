@@ -68,7 +68,7 @@ Electron apps run code in three distinct environments, each with different respo
 
 **What it does**
 
-+	HTML, CSS, JS
++	HTML, CSS, TS
 +	UI logic
 +	Event handling
 +	Drawing waveforms
@@ -83,7 +83,7 @@ Electron apps run code in three distinct environments, each with different respo
 
 **Usage in our PoC**
 
-Our renderer.js:
+Our `src/renderer.ts`:
 
 +	Handles WaveSurfer
 +	Renders transcript words
@@ -116,7 +116,7 @@ Because Electron wants:
 
 **Usage in our PoC**
 
-Our preload.js:
+Our `src/preload.ts`:
 
 +	Exposes window.otter
 +	Wraps IPC calls

@@ -2,6 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:;">
     <title>OTTER Proof of Concept</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
@@ -113,6 +114,6 @@
 
     <script src="./node_modules/wavesurfer.js/dist/wavesurfer.min.js"></script>
     <script src="./node_modules/wavesurfer.js/dist/plugins/regions.min.js"></script>
-    <script src="./renderer.js"></script>
+    <script type="module" src="./dist/renderer.js"></script>
   </body>
 </html>
