@@ -231,7 +231,7 @@ Also, new collections of parameters will emerge from careful tuning of the pipel
 
 ## TypeScript Context
 
-TypeScript is a superset of JavaScript. That means every valid JavaScript program is valid TypeScript, but TypeScript adds static types and tooling that can catch mistakes before you run the code.
+TypeScript is a superset of JavaScript. That means every valid JavaScript program is valid TypeScript, but TypeScript adds static types and tooling that can catch mistakes before you run the code. TypeScript ultimately compiles to JavaScript, so changes in `src/` must be recompiled to take effect. The `npm start` command does this automatically before launching Electron. The resulting JavaScript code lives in `dist/`.
 
 Why we use TypeScript here:
 
@@ -241,17 +241,20 @@ Why we use TypeScript here:
 
 Special considerations for Electron in this project:
 
-+ Conversion choices we made:
-+ We use `strict: true` so TypeScript is a strong correctness tool, not just a hint system.
-+ We compile main + preload to CommonJS because they run in the Node/Electron context.
-+ We compile the renderer to ES modules because it runs in the browser context.
-+ We use ESLint to keep style consistent and catch common mistakes early.
++ Safety:
+	+ We use `strict: true` so TypeScript is a strong correctness tool, not just a hint system.
+	+ We use ESLint to keep style consistent and catch common mistakes early.
+	+ Run `npm run lint` to check for issues.
 
-+ Electron has two different runtime contexts: the main/preload scripts run in Node, while the renderer runs in the browser. We compile main + preload to CommonJS and the renderer to ES modules to match those environments.
-+ The renderer should not import Node modules directly. Instead, it talks to the main process through `window.otter` (the preload bridge).
-+ TypeScript types for `window.otter` are declared in the renderer so the browser code knows what APIs exist.
-+ `npm start` compiles the TypeScript sources into `dist/` before launching Electron, so changes in `src/` must be recompiled to take effect.
-+ ESLint is configured to help catch mistakes and keep code style consistent; you can run `npm run lint` to check for issues.
++ Runtime Contexts:
+	+ Electron has two different runtime contexts: Node and the Browser
+	+ The main/preload scripts run in Node, while the renderer runs in the browser.
+	+ We compile main/preload to CommonJS for Node
+	+ We compile the renderer to ES modules for the browser.
+	+ Connecting the Contexts:
+		+ The renderer should not import Node modules directly. Instead, it talks to the main process through `window.otter` (the preload bridge).
+		+ TypeScript types for `window.otter` are declared in the renderer so the browser code knows what APIs exist.
+
 
 ## License
 
