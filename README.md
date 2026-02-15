@@ -60,7 +60,7 @@ To keep the focus clear, this prototype does not attempt to:
 + Package into a self-contained application
 + Provide a polished end-user experience
 
-These are deliberate omissions and are appropriate topics for the full capstone project. The Capstone Proposal can be found here: [doc/OTTER Proposal v1](OTTER\ Proposal.pdf). 
+These are deliberate omissions and are appropriate topics for the full capstone project. The Capstone Proposal can be found here: [OTTER Proposal v1](doc/OTTER\ Proposal \v1.pdf). 
 
 ### Languages
 
@@ -114,8 +114,8 @@ In this example we converted a format commonly produced by Apple devices into a 
 1. Clone the repository
 
 	```
-	git clone https://github.com/jpasqua/otter-poc.git
-	cd otter-poc
+	git clone https://github.com/Austin-Metke/OTTER.git
+	cd OTTER
 	```
 
 1. Install Node dependencies
