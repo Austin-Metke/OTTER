@@ -50,6 +50,29 @@ type TranscriptWord = {
   [key: string]: unknown;
 };
 
+const mockWords: TranscriptWord[] = [
+  { word: "test1", start: 0.0, end: 0.5 },
+  { word: "test2", start: 0.5, end: 1.0 },
+  { word: "test3", start: 1.0, end: 1.3 },
+  { word: "test4", start: 1.3, end: 1.5 },
+  { word: "test5", start: 1.5, end: 1.6 },
+  { word: "test6", start: 1.6, end: 2.0 },
+  { word: "test7", start: 2.0, end: 2.8 },
+  { word: "test8", start: 2.8, end: 3.0 },
+  { word: "test9", start: 3.0, end: 3.6 },
+  { word: "test10", start: 3.6, end: 4.2 },
+  { word: "test11", start: 4.2, end: 4.5 },
+  { word: "test12", start: 4.5, end: 5.0 },
+  { word: "test13", start: 5.0, end: 5.4 },
+  { word: "test14", start: 5.4, end: 5.6 },
+  { word: "test15", start: 5.6, end: 6.1 },
+  { word: "test16", start: 6.1, end: 6.3 },
+  { word: "test17", start: 6.3, end: 6.7 },
+  { word: "test18", start: 6.7, end: 7.2 },
+  { word: "test19", start: 7.2, end: 7.4 },
+  { word: "test20", start: 7.4, end: 8.0 },
+];
+
 type TranscriptResult =
   | TranscriptWord[]
   | {
@@ -295,6 +318,8 @@ async function loadDetailForRange(start: number, end: number) {
  */
 function renderTranscript(words: TranscriptWord[]) {
   transcriptEl.innerHTML = "";
+  let isDragging = false; 
+  let dragStart: number | null = null; //Which word index the drag started on
 
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
@@ -328,8 +353,33 @@ function renderTranscript(words: TranscriptWord[]) {
       }
     });
 
+    //Start selection when user clicks on a word
+    span.addEventListener('mousedown', async(event: MouseEvent) => {
+      event.preventDefault();
+      isDragging =true;
+      dragStart = i;
+      setSelectionRange(i, i);
+    });
+
+      //While the user is highlighting words, the selection range gets updated
+      span.addEventListener('mouseenter', () => {
+      if (isDragging && dragStart !== null) 
+        {
+        setSelectionRange(dragStart, i);  
+      }
+    });
+
+      
+
     transcriptEl.appendChild(span);
   }
+
+    // Stop dragging when mouse is released anywhere
+      document.addEventListener('mouseup', () => {
+        isDragging = false;
+        dragStart = null; // reset drag start index
+      });
+
 
   // Re-apply selection and playhead after re-render (e.g., new transcript)
   if (selectionStart != null && selectionEnd != null) {
@@ -829,3 +879,6 @@ const WORD_REGION_COLOR = getCssVar(
   "--word-region-color",
   "rgba(255, 200, 0, 0.35)"
 );
+
+//Will delete later, just to see test highlighting some words
+renderTranscript(mockWords);
