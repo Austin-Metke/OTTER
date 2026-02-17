@@ -132,6 +132,19 @@ contextBridge.exposeInMainWorld("otter", {
    */
   readFileAsArrayBuffer,
 
+  /**
+   * Pause an in-progress transcription
+   *
+   * @returns {Promise<boolean>} True if the transcription was paused, false if there was no active transcription.
+   */
+  pauseTranscription: () => ipcRenderer.invoke("pause-transcription"),
+
+  /**
+   * Resume a paused transcription
+   *
+   * @returns {Promise<boolean>} True if the transcription was resumed, false if there was no active transcription.
+   */
+  resumeTranscription: () => ipcRenderer.invoke("resume-transcription"),
 
   /**
    * Cancel an in-progress transcription

@@ -238,10 +238,15 @@ ipcMain.handle(
       child.on("close", (code, signal) => {
         activeProcess = null;
 
-        if (signal !== null) {
-          // Process was killed
-          reject(new Error("transcription cancelled."))
+        switch(signal) {
+          case('SIGKILL'):
+            reject(new Error("transcription cancelled."));
+            break;
+          case 'SIGTSTP':
+            reject(new Error("transcription paused."));
+            break;
         }
+
 
         if (code !== 0) {
           reject(new Error(`transcribe exited with ${code}\n${stderr}`));
@@ -264,6 +269,22 @@ ipcMain.handle("cancel-transcription", async () => {
   if (activeProcess) {
     // childProcess.kill() returns true or false if the process was successfully killed
     return activeProcess.kill("SIGTERM");
+  }
+  return false;
+});
+
+ipcMain.handle("pause-transcription", async () => {
+  if (activeProcess) {
+    // Send SIGSTOP to the active process
+    return activeProcess.kill("SIGSTOP");
+  }
+  return false;
+});
+
+ipcMain.handle("resume-transcription", async () => {
+  if (activeProcess) {
+    // Send SIGCONT to the active process
+    return activeProcess.kill("SIGCONT");
   }
   return false;
 });
