@@ -132,6 +132,14 @@ contextBridge.exposeInMainWorld("otter", {
    */
   readFileAsArrayBuffer,
 
+
+  /**
+   * Cancel an in-progress transcription
+   *
+   * @returns {Promise<boolean>} True if the transcription was cancelled, false if there was no active transcription.
+   */
+  cancelTranscription: () => ipcRenderer.invoke("cancel-transcription"),
+
   /**
    * List available pipeline spec files (all *.json under otter_py/sample_specs).
    *
