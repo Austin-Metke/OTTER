@@ -133,6 +133,27 @@ contextBridge.exposeInMainWorld("otter", {
   readFileAsArrayBuffer,
 
   /**
+   * Pause an in-progress transcription
+   *
+   * @returns {Promise<boolean>} True if the transcription was paused, false if there was no active transcription.
+   */
+  pauseTranscription: () => ipcRenderer.invoke("pause-transcription"),
+
+  /**
+   * Resume a paused transcription
+   *
+   * @returns {Promise<boolean>} True if the transcription was resumed, false if there was no active transcription.
+   */
+  resumeTranscription: () => ipcRenderer.invoke("resume-transcription"),
+
+  /**
+   * Cancel an in-progress transcription
+   *
+   * @returns {Promise<boolean>} True if the transcription was cancelled, false if there was no active transcription.
+   */
+  cancelTranscription: () => ipcRenderer.invoke("cancel-transcription"),
+
+  /**
    * List available pipeline spec files (all *.json under otter_py/sample_specs).
    *
    * @returns {Promise<string[]>} Array of spec file names (e.g. ["default_spec.json", ...])
