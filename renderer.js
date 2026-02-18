@@ -121,6 +121,7 @@ function shortenFilenameMiddle(filename, maxLength = 40) {
 const transcriptEl = document.getElementById("transcript");
 const btnChoose = document.getElementById("btnChoose");
 const btnTranscribe = document.getElementById("btnTranscribe");
+const chkFastMode = document.getElementById("chkFastMode");
 const statusEl = document.getElementById("status");
 
 function normalizeRange(a, b) {
@@ -566,7 +567,14 @@ btnTranscribe.addEventListener("click", async () => {
     progressEl.value = 0;
     progressEl.hidden = false;
 
-    const result = await window.otter.transcribeAudio(audioPath, getActiveSpecArg());
+    // Determine which spec to use based on fast mode
+    let specArg = getActiveSpecArg();
+    if (chkFastMode.checked && !chkCustomSpec.checked) {
+      // In fast mode, use fast_spec.json unless user has customized
+      specArg = { mode: "file", name: "fast_spec.json" };
+    }
+
+    const result = await window.otter.transcribeAudio(audioPath, specArg);
     words = Array.isArray(result) ? result : (result.words || []);
     setStatus(`Transcript ready (${words.length} words, lang=${result.language})`, "success");
     renderTranscript(words);

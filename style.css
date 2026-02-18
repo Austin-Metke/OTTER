@@ -53,6 +53,26 @@ header {
 #status.error   { background: #fee2e2; color: #991b1b; }
 #status.success { background: #dcfce7; color: #166534; }
 
+/* Fast Mode Toggle */
+.fastModeLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.fastModeLabel input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.fastModeWarning {
+  font-size: 16px;
+  color: #f59e0b;
+  font-weight: bold;
+}
+
 /* ============================================================================
    Main Two-Pane Layout
    ========================================================================== */

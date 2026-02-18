@@ -12,6 +12,12 @@
       <button id="btnChoose">Choose Audio…</button>
       <button id="btnTranscribe" disabled>Transcribe</button>
 
+      <label class="fastModeLabel" title="Use a smaller, faster model for quicker results (less accurate)">
+        <input type="checkbox" id="chkFastMode" />
+        Fast Mode
+        <span class="fastModeWarning" title="Fast mode uses a smaller model and may produce less accurate results">⚠</span>
+      </label>
+
       <div class="statusArea">
         <div id="status"></div>
         <progress id="transcribeProgress" value="0" max="100" hidden></progress>
