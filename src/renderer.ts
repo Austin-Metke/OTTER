@@ -62,6 +62,30 @@ type TranscribeSpec =
   | { mode: "file"; name: string }
   | { mode: "json"; jsonText: string };
 
+// ---------------------------------------------------------------------------
+// EDL (Edit Decision List) types
+//
+// An EDL is a pure metadata document — an ordered list of time-range
+// references into the original audio file. The source audio is never
+// modified. Edits are "virtual" until the user explicitly exports.
+// ---------------------------------------------------------------------------
+
+type EdlEntry = {
+  id: string;               // stable unique ID
+  sourceStart: number;      // start time in original audio (seconds)
+  sourceEnd: number;        // end time in original audio (seconds)
+  label: string;            // display text (the word or phrase)
+  muted: boolean;           // true = skip on playback and export (soft delete)
+};
+
+type Edl = {
+  version: 1;
+  sourceFile: string;       // absolute path to the original audio
+  entries: EdlEntry[];      // ordered list — playback/export order
+  createdAt: string;        // ISO timestamp
+  modifiedAt: string;
+};
+
 type OtterApi = {
   chooseAudioFile: () => Promise<string | null>;
   transcribeAudio: (audioPath: string, spec?: TranscribeSpec) => Promise<TranscriptResult>;
@@ -73,6 +97,9 @@ type OtterApi = {
   listSpecFiles: () => Promise<string[]>;
   readSpecFile: (name: string) => Promise<string>;
   readDefaultSpec: () => Promise<string>;
+  saveEdl: (edlJson: string) => Promise<string | null>;
+  loadEdl: () => Promise<{ path: string; content: string } | null>;
+  exportEdlAudio: (edlJson: string) => Promise<string | null>;
 };
 
 declare global {
@@ -102,6 +129,17 @@ let selectionStart: number | null = null;
 let selectionEnd: number | null = null;
 let selectionAnchor: number | null = null;
 let playheadIndex = -1;
+
+// EDL state
+let edl: Edl | null = null;
+
+// Which EDL entry indices are currently shown in the detail waveform.
+// Used to write resized region boundaries back to the correct entries.
+let detailSelStart: number | null = null;
+let detailSelEnd: number | null = null;
+
+// Guard flag to prevent re-entrant seeking while skipping muted regions.
+let isSkippingMuted = false;
 
 //
 // Utility Functions
@@ -153,6 +191,104 @@ function mustGetEl<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
   if (!el) throw new Error(`Missing required element: ${id}`);
   return el as T;
+}
+
+
+// ---------------------------------------------------------------------------
+// EDL utility functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Build an initial EDL from a completed transcript.
+ *
+ * This creates the "identity EDL" where every word is included in order.
+ * Subsequent edits (mute, boundary adjustment, etc.) mutate this structure
+ * without ever touching the original audio file.
+ */
+function buildEdlFromTranscript(
+  transcriptWords: TranscriptWord[],
+  sourceFile: string
+): Edl {
+  const now = new Date().toISOString();
+  return {
+    version: 1,
+    sourceFile,
+    entries: transcriptWords.map((w, i) => ({
+      id: `w${i}_${crypto.randomUUID().slice(0, 8)}`,
+      sourceStart: w.start,
+      sourceEnd: w.end,
+      label: w.word,
+      muted: false,
+    })),
+    createdAt: now,
+    modifiedAt: now,
+  };
+}
+
+/**
+ * Validate that a parsed object looks like a valid EDL.
+ */
+function validateEdl(obj: unknown): obj is Edl {
+  if (!obj || typeof obj !== "object") return false;
+  const o = obj as Record<string, unknown>;
+  if (o.version !== 1) return false;
+  if (typeof o.sourceFile !== "string") return false;
+  if (!Array.isArray(o.entries)) return false;
+  return (o.entries as unknown[]).every((e) => {
+    if (!e || typeof e !== "object") return false;
+    const entry = e as Record<string, unknown>;
+    return (
+      typeof entry.id === "string" &&
+      typeof entry.sourceStart === "number" &&
+      typeof entry.sourceEnd === "number" &&
+      typeof entry.label === "string" &&
+      typeof entry.muted === "boolean"
+    );
+  });
+}
+
+/**
+ * Enable or disable EDL-related buttons based on current state.
+ *
+ * Called whenever the EDL is created/loaded or the selection changes.
+ */
+function updateEdlButtonStates() {
+  const hasEdl = edl != null;
+  const hasSel = selectionStart != null && selectionEnd != null;
+
+  btnMute.disabled = !hasEdl || !hasSel;
+  btnUnmute.disabled = !hasEdl || !hasSel;
+  btnSaveEdl.disabled = !hasEdl;
+  btnExport.disabled = !hasEdl;
+}
+
+/**
+ * Write the detail-region's current bounds back to the corresponding
+ * EDL entry (and the parallel words[] array) so that boundary
+ * adjustments are persisted in the EDL.
+ */
+function writebackRegionBounds() {
+  if (!edl || !detailRegion || detailSelStart == null) return;
+
+  const absStart = detailWinStartAbs + detailRegion.start;
+  const absEnd = detailWinStartAbs + detailRegion.end;
+
+  if (detailSelStart === detailSelEnd) {
+    // Single word: update its full boundary
+    const i = detailSelStart;
+    edl.entries[i].sourceStart = absStart;
+    edl.entries[i].sourceEnd = absEnd;
+    words[i].start = absStart;
+    words[i].end = absEnd;
+  } else if (detailSelEnd != null) {
+    // Multi-word range: update first entry's start, last entry's end
+    edl.entries[detailSelStart].sourceStart = absStart;
+    words[detailSelStart].start = absStart;
+    edl.entries[detailSelEnd].sourceEnd = absEnd;
+    words[detailSelEnd].end = absEnd;
+  }
+
+  edl.modifiedAt = new Date().toISOString();
 }
 
 
@@ -217,6 +353,8 @@ function setSelectionRange(start: number | null, end: number | null) {
       idx <= selectionEnd;
     el.classList.toggle("selected", inRange);
   });
+
+  updateEdlButtonStates();
 }
 
 
@@ -304,6 +442,11 @@ function renderTranscript(words: TranscriptWord[]) {
     span.textContent = w.word + " ";
     span.dataset.index = String(i);
 
+    // Apply muted styling if this word is muted in the EDL
+    if (edl && edl.entries[i] && edl.entries[i].muted) {
+      span.classList.add("muted");
+    }
+
     span.addEventListener("click", async (event: MouseEvent) => {
       // Transcript click = select word + seek main audio
       if (event.shiftKey && selectionAnchor != null) {
@@ -320,6 +463,10 @@ function renderTranscript(words: TranscriptWord[]) {
       const rangeEndIdx = selectionEnd != null ? selectionEnd : i;
       const rangeStart = Number(words[rangeStartIdx].start);
       const rangeEnd = Number(words[rangeEndIdx].end);
+
+      // Remember which entries the detail view is showing (for boundary writeback)
+      detailSelStart = rangeStartIdx;
+      detailSelEnd = rangeEndIdx;
 
       try {
         await loadDetailForRange(rangeStart, rangeEnd);
@@ -404,6 +551,34 @@ ws.on("timeupdate", (t: number) => {
   // use a more robust alignment strategy and allow user-adjusted
   // boundaries to override ASR timings.
 
+  // EDL-aware playback: skip muted regions during playback.
+  // When the playhead enters a muted word's time range, seek past it
+  // (and any consecutive muted words) to the next non-muted word.
+  if (edl && ws.isPlaying() && !isSkippingMuted) {
+    for (let i = 0; i < edl.entries.length; i++) {
+      const e = edl.entries[i];
+      if (e.muted && te >= e.sourceStart && te < e.sourceEnd) {
+        // Find the end of any consecutive muted region
+        let skipTo = e.sourceEnd;
+        let keepLooking = true;
+        while (keepLooking) {
+          keepLooking = false;
+          for (const e2 of edl.entries) {
+            if (e2.muted && skipTo >= e2.sourceStart && skipTo < e2.sourceEnd) {
+              skipTo = e2.sourceEnd;
+              keepLooking = true;
+              break;
+            }
+          }
+        }
+        isSkippingMuted = true;
+        ws.setTime(skipTo);
+        isSkippingMuted = false;
+        break;
+      }
+    }
+  }
+
   // We use a simple linear scan for this PoC, but
   // a real implementation should be smarter (e.g. binary search)
   let idx = -1;
@@ -483,7 +658,10 @@ function setDetailWordRegion(localStart: number, localEnd: number) {
     color: WORD_REGION_COLOR
   });
   updateDetailBounds();
-  detailRegion.on("update", () => { updateDetailBounds(); });
+  detailRegion.on("update", () => {
+    updateDetailBounds();
+    writebackRegionBounds();
+  });
 }
 
 /*
@@ -616,6 +794,11 @@ btnTranscribe.addEventListener("click", async () => {
     const lang = Array.isArray(result) ? undefined : result.language;
     const langSuffix = lang ? `, lang=${lang}` : "";
     setStatus(`Transcript ready (${words.length} words${langSuffix})`, "success");
+
+    // Build the initial EDL from the transcript (identity: every word included)
+    edl = buildEdlFromTranscript(words, audioPath!);
+    updateEdlButtonStates();
+
     renderTranscript(words);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -632,6 +815,8 @@ btnTranscribe.addEventListener("click", async () => {
 btnChoose.addEventListener("click", async () => {
   transcriptEl.innerHTML = "";
   logEl.textContent = "";
+  edl = null;               // reset EDL when loading a new file
+  updateEdlButtonStates();
   setStatus("Choosing file…", "info");
 
   audioPath = await otter.chooseAudioFile();
@@ -811,6 +996,155 @@ specSelect.addEventListener("change", async () => {
   showCustomArea(false);
 })();
 
+//==============================================================================
+//
+// BEGIN: EDL editing controls (Mute / Unmute / Save / Load / Export)
+//
+//==============================================================================
+
+const btnMute = mustGetEl<HTMLButtonElement>("btnMute");
+const btnUnmute = mustGetEl<HTMLButtonElement>("btnUnmute");
+const btnSaveEdl = mustGetEl<HTMLButtonElement>("btnSaveEdl");
+const btnLoadEdl = mustGetEl<HTMLButtonElement>("btnLoadEdl");
+const btnExport = mustGetEl<HTMLButtonElement>("btnExport");
+
+/**
+ * Toggle the muted state on the currently selected words.
+ *
+ * @param {boolean} mute - true = mute, false = unmute
+ */
+function setMuteOnSelection(mute: boolean) {
+  if (!edl || selectionStart == null || selectionEnd == null) return;
+
+  for (let i = selectionStart; i <= selectionEnd; i++) {
+    if (edl.entries[i]) edl.entries[i].muted = mute;
+  }
+  edl.modifiedAt = new Date().toISOString();
+
+  // Re-render the transcript to reflect the muted/unmuted state
+  renderTranscript(words);
+}
+
+// --- Mute / Unmute buttons ---
+
+btnMute.addEventListener("click", () => setMuteOnSelection(true));
+btnUnmute.addEventListener("click", () => setMuteOnSelection(false));
+
+// --- Keyboard shortcut: M = toggle mute on selection ---
+
+document.addEventListener("keydown", (e: KeyboardEvent) => {
+  // Don't intercept when user is typing in an input/textarea
+  const tag = (e.target as HTMLElement).tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+  if (e.key === "m" || e.key === "M") {
+    if (!edl || selectionStart == null || selectionEnd == null) return;
+
+    // Toggle: if all selected are muted → unmute; otherwise mute
+    const allMuted = edl.entries
+      .slice(selectionStart, selectionEnd + 1)
+      .every((entry) => entry.muted);
+
+    setMuteOnSelection(!allMuted);
+  }
+});
+
+// --- Save EDL ---
+
+btnSaveEdl.addEventListener("click", async () => {
+  if (!edl) return;
+
+  try {
+    const json = JSON.stringify(edl, null, 2);
+    const savedPath = await otter.saveEdl(json);
+    if (savedPath) {
+      const fname = savedPath.split("/").pop() ?? savedPath;
+      setStatus(`EDL saved: ${fname}`, "success");
+      appendLog(`EDL saved to ${savedPath}\n`);
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setStatus("Failed to save EDL.", "error");
+    appendLog("\nERROR saving EDL:\n" + msg + "\n");
+  }
+});
+
+// --- Load EDL ---
+
+btnLoadEdl.addEventListener("click", async () => {
+  try {
+    const result = await otter.loadEdl();
+    if (!result) return;
+
+    const parsed = JSON.parse(result.content);
+    if (!validateEdl(parsed)) {
+      setStatus("Invalid EDL file.", "error");
+      appendLog("\nERROR: file is not a valid OTTER EDL.\n");
+      return;
+    }
+
+    edl = parsed;
+    audioPath = edl!.sourceFile;
+
+    // Reconstruct the words array from the EDL entries
+    words = edl!.entries.map((e) => ({
+      word: e.label,
+      start: e.sourceStart,
+      end: e.sourceEnd,
+    }));
+
+    // Load the source audio waveform
+    const ab = await otter.readFileAsArrayBuffer(audioPath);
+    const blob = new Blob([ab]);
+    await ws.loadBlob(blob);
+
+    // Update UI state
+    const fname = audioPath.split("/").pop() ?? audioPath;
+    fnameEl.textContent = shortenFilenameMiddle(fname);
+    setStatus(`EDL loaded (${edl!.entries.length} entries)`, "success");
+    appendLog(`EDL loaded from ${result.path}\n`);
+
+    btnPlay.disabled = false;
+    btnTranscribe.disabled = false;
+    updateEdlButtonStates();
+    renderTranscript(words);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setStatus("Failed to load EDL.", "error");
+    appendLog("\nERROR loading EDL:\n" + msg + "\n");
+  }
+});
+
+// --- Export Audio ---
+
+btnExport.addEventListener("click", async () => {
+  if (!edl) return;
+
+  const nonMuted = edl.entries.filter((e) => !e.muted);
+  if (nonMuted.length === 0) {
+    setStatus("Nothing to export (all words muted).", "error");
+    return;
+  }
+
+  try {
+    setStatus("Exporting audio…", "working");
+    const json = JSON.stringify(edl, null, 2);
+    const outPath = await otter.exportEdlAudio(json);
+    if (outPath) {
+      const fname = outPath.split("/").pop() ?? outPath;
+      setStatus(`Exported: ${fname}`, "success");
+      appendLog(`Audio exported to ${outPath}\n`);
+    } else {
+      setStatus("Export canceled.", "info");
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setStatus("Export failed.", "error");
+    appendLog("\nERROR exporting audio:\n" + msg + "\n");
+  }
+});
+
+
 export {};
 
 //
@@ -824,6 +1158,7 @@ export {};
 setDetailPlayIcon(false);
 btnDetailPlay.disabled = true;
 btnRegion.disabled = true;
+updateEdlButtonStates();
 const WORD_REGION_COLOR = getCssVar(
   waveDetailPane,
   "--word-region-color",

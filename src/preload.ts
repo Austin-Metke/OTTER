@@ -157,4 +157,37 @@ contextBridge.exposeInMainWorld("otter", {
   readDefaultSpec: (): Promise<string> =>
     ipcRenderer.invoke("read-spec-file", "default_spec.json"),
 
+  // -------------------------------------------------------------------------
+  // EDL (Edit Decision List) operations
+  // -------------------------------------------------------------------------
+
+  /**
+   * Save an EDL to a user-chosen file.
+   *
+   * @param {string} edlJson - Serialized EDL JSON
+   * @returns {Promise<string|null>} File path where saved, or null if canceled
+   */
+  saveEdl: (edlJson: string): Promise<string | null> =>
+    ipcRenderer.invoke("save-edl", edlJson),
+
+  /**
+   * Open a file dialog and load an EDL JSON file from disk.
+   *
+   * @returns {Promise<{path: string, content: string}|null>} EDL file info, or null if canceled
+   */
+  loadEdl: (): Promise<{ path: string; content: string } | null> =>
+    ipcRenderer.invoke("load-edl"),
+
+  /**
+   * Export edited audio from an EDL via ffmpeg.
+   *
+   * The original source audio is never modified — ffmpeg reads it and writes
+   * a new file containing only the non-muted segments in EDL order.
+   *
+   * @param {string} edlJson - Serialized EDL JSON
+   * @returns {Promise<string|null>} Output file path, or null if canceled
+   */
+  exportEdlAudio: (edlJson: string): Promise<string | null> =>
+    ipcRenderer.invoke("export-edl-audio", edlJson),
+
 });

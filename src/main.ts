@@ -39,6 +39,22 @@ type TranscribeSpec =
   | { mode: "file"; name: string }
   | { mode: "json"; jsonText: string };
 
+type EdlEntry = {
+  id: string;
+  sourceStart: number;
+  sourceEnd: number;
+  label: string;
+  muted: boolean;
+};
+
+type Edl = {
+  version: 1;
+  sourceFile: string;
+  entries: EdlEntry[];
+  createdAt: string;
+  modifiedAt: string;
+};
+
 let win: BrowserWindow | null = null;
 const repoRoot = path.join(__dirname, "..");
 
@@ -279,6 +295,25 @@ ipcMain.handle("read-spec-file", async (_event: IpcMainInvokeEvent, name: string
 });
 
 /**
+ * Shared helper: run an ffmpeg command and return a promise.
+ *
+ * Used by make-snippet and export-edl-audio to avoid duplicating the
+ * spawn-and-wait pattern.
+ */
+function runFfmpeg(args: string[]): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn("ffmpeg", args);
+    let err = "";
+    child.stderr.on("data", (d: Buffer) => (err += d.toString()));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg failed (${code}): ${err}`));
+    });
+  });
+}
+
+/**
  * IPC: Create a short WAV snippet from a source audio file using ffmpeg.
  *
  * This is used to build a “detail waveform” view around a selected word. The
@@ -340,3 +375,144 @@ ipcMain.handle(
 
   return outPath;
 });
+
+// =============================================================================
+// EDL: Save / Load / Export
+// =============================================================================
+
+/**
+ * IPC: Save an EDL to disk.
+ *
+ * Opens a native save dialog and writes the EDL JSON to the chosen path.
+ *
+ * @param {string} edlJson - Serialized EDL JSON string
+ * @returns {Promise<string|null>} Absolute path to saved file, or null if canceled
+ */
+ipcMain.handle("save-edl", async (_event: IpcMainInvokeEvent, edlJson: string) => {
+  const options = {
+    title: "Save EDL",
+    defaultPath: "untitled.otter-edl.json",
+    filters: [
+      { name: "OTTER EDL", extensions: ["json"] },
+      { name: "All Files", extensions: ["*"] },
+    ],
+  };
+
+  const result = win
+    ? await dialog.showSaveDialog(win, options)
+    : await dialog.showSaveDialog(options);
+
+  if (result.canceled || !result.filePath) return null;
+
+  fs.writeFileSync(result.filePath, edlJson, "utf-8");
+  return result.filePath;
+});
+
+/**
+ * IPC: Load an EDL from disk.
+ *
+ * Opens a native file picker, reads the chosen JSON file, and returns its
+ * path and raw content so the renderer can restore editing state.
+ *
+ * @returns {Promise<{path: string, content: string}|null>}
+ */
+ipcMain.handle("load-edl", async () => {
+  const options: OpenDialogOptions = {
+    title: "Load EDL",
+    properties: ["openFile"],
+    filters: [
+      { name: "OTTER EDL", extensions: ["json"] },
+      { name: "All Files", extensions: ["*"] },
+    ],
+  };
+
+  const result = win
+    ? await dialog.showOpenDialog(win, options)
+    : await dialog.showOpenDialog(options);
+
+  if (result.canceled || result.filePaths.length === 0) return null;
+
+  const filePath = result.filePaths[0];
+  const content = fs.readFileSync(filePath, "utf-8");
+  return { path: filePath, content };
+});
+
+/**
+ * IPC: Export audio from an EDL by concatenating non-muted segments.
+ *
+ * Builds an ffmpeg filter_complex that trims each non-muted segment from the
+ * source audio and concatenates them into a single output file. The original
+ * audio is only read, never modified.
+ *
+ * @param {string} edlJson - Serialized EDL JSON string
+ * @returns {Promise<string|null>} Absolute path to exported file, or null if canceled
+ */
+ipcMain.handle("export-edl-audio", async (_event: IpcMainInvokeEvent, edlJson: string) => {
+  const edl: Edl = JSON.parse(edlJson);
+  const entries = (edl.entries || []).filter((e) => !e.muted);
+
+  if (entries.length === 0) {
+    throw new Error("No non-muted segments to export.");
+  }
+
+  const options = {
+    title: "Export Audio",
+    defaultPath: "export.wav",
+    filters: [
+      { name: "WAV Audio", extensions: ["wav"] },
+    ],
+  };
+
+  const result = win
+    ? await dialog.showSaveDialog(win, options)
+    : await dialog.showSaveDialog(options);
+
+  if (result.canceled || !result.filePath) return null;
+
+  // Build ffmpeg filter_complex:
+  //   [0]atrim=start=S0:end=E0,asetpts=PTS-STARTPTS[a0];
+  //   [0]atrim=start=S1:end=E1,asetpts=PTS-STARTPTS[a1];
+  //   [a0][a1]concat=n=2:v=0:a=1[out]
+  const sourceFile = edl.sourceFile;
+  const filterParts: string[] = [];
+  const concatInputs: string[] = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    filterParts.push(
+      `[0]atrim=start=${e.sourceStart}:end=${e.sourceEnd},asetpts=PTS-STARTPTS[a${i}]`
+    );
+    concatInputs.push(`[a${i}]`);
+  }
+
+  const filterComplex =
+    filterParts.join("; ") +
+    "; " +
+    concatInputs.join("") +
+    `concat=n=${entries.length}:v=0:a=1[out]`;
+
+  const args = [
+    "-hide_banner",
+    "-y",
+    "-i", sourceFile,
+    "-filter_complex", filterComplex,
+    "-map", "[out]",
+    "-c:a", "pcm_s16le",
+    result.filePath,
+  ];
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("ffmpeg", args);
+    let err = "";
+    child.stderr.on("data", (d: Buffer) => (err += d.toString()));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg export failed (${code}): ${err}`));
+    });
+  });
+
+  return result.filePath;
+});
+
+
