@@ -40,6 +40,7 @@ type TranscribeSpec =
   | { mode: "json"; jsonText: string };
 
 let win: BrowserWindow | null = null;
+let activeProcess: ReturnType<typeof spawn> | null = null;
 const repoRoot = path.join(__dirname, "..");
 
 /**
@@ -178,77 +179,115 @@ ipcMain.handle(
     audioPath: string,
     spec?: TranscribeSpec
   ) => {
-  function getPythonPath() {
-    const venvPython = path.join(repoRoot, ".venv", "bin", "python3");
-    if (fs.existsSync(venvPython)) return venvPython;
-    return "python3";
-  }
+    function getPythonPath() {
+      const venvPython = path.join(repoRoot, ".venv", "bin", "python3");
+      if (fs.existsSync(venvPython)) return venvPython;
+      return "python3";
+    }
 
-  // Run from the repo root so "python -m otter_py.transcribe" works.
-  const cwd = repoRoot;
+    // Run from the repo root so "python -m otter_py.transcribe" works.
+    const cwd = repoRoot;
 
-  // Build argv for: python -m otter_py.transcribe run --audio ... --spec-...
-  const python = getPythonPath();
-  const argv = ["-m", "otter_py.transcribe", "run", "--audio", audioPath];
+    // Build argv for: python -m otter_py.transcribe run --audio ... --spec-...
+    const python = getPythonPath();
+    const argv = ["-m", "otter_py.transcribe", "run", "--audio", audioPath];
 
-  // Choose spec source
-  if (spec?.mode === "file") {
-    // All presets live here; only pass a filename from renderer for safety.
-    const specPath = path.join(repoRoot, "otter_py", "sample_specs", spec.name);
-    argv.push("--spec-file", specPath);
-  } else if (spec?.mode === "json") {
-    argv.push("--spec-json", spec.jsonText);
-  } else {
-    // Default: use default_spec.json
-    const specPath = path.join(repoRoot, "otter_py", "sample_specs", "default_spec.json");
-    argv.push("--spec-file", specPath);
-  }
+    // Choose spec source
+    if (spec?.mode === "file") {
+      // All presets live here; only pass a filename from renderer for safety.
+      const specPath = path.join(repoRoot, "otter_py", "sample_specs", spec.name);
+      argv.push("--spec-file", specPath);
+    } else if (spec?.mode === "json") {
+      argv.push("--spec-json", spec.jsonText);
+    } else {
+      // Default: use default_spec.json
+      const specPath = path.join(repoRoot, "otter_py", "sample_specs", "default_spec.json");
+      argv.push("--spec-file", specPath);
+    }
 
-  // Optional: if you want meta sometimes
-  // argv.push("--emit-meta");
+    // Optional: if you want meta sometimes
+    // argv.push("--emit-meta");
 
-  return await new Promise((resolve, reject) => {
-    const child = spawn(python, argv, { cwd });
+    return await new Promise((resolve, reject) => {
+      const child = spawn(python, argv, { cwd });
+      activeProcess = child;
 
-    let stdout = "";
-    let stderr = "";
+      let stdout = "";
+      let stderr = "";
 
-    child.stdout.on("data", (d: Buffer) => {
-      const s = d.toString();
-      stdout += s;
-    });
+      child.stdout.on("data", (d: Buffer) => {
+        const s = d.toString();
+        stdout += s;
+      });
 
-    child.stderr.on("data", (d: Buffer) => {
-      const s = d.toString();
-      stderr += s;
+      child.stderr.on("data", (d: Buffer) => {
+        const s = d.toString();
+        stderr += s;
 
-      // Parse progress lines of the form "PROGRESS:NN"
-      // (Allow multiple lines in a single chunk.)
-      for (const line of s.split(/\r?\n/)) {
-        const m = line.match(/^PROGRESS:(\d{1,3})\s*$/);
-        if (m) event.sender.send("transcribe-progress", Number(m[1]));
-        else if (line.trim()) event.sender.send("transcribe-log", line + "\n");
-      }
-    });
+        // Parse progress lines of the form "PROGRESS:NN"
+        // (Allow multiple lines in a single chunk.)
+        for (const line of s.split(/\r?\n/)) {
+          const m = line.match(/^PROGRESS:(\d{1,3})\s*$/);
+          if (m) event.sender.send("transcribe-progress", Number(m[1]));
+          else if (line.trim()) event.sender.send("transcribe-log", line + "\n");
+        }
+      });
 
-    child.on("error", reject);
+      child.on("error", reject);
 
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(`transcribe exited with ${code}\n${stderr}`));
-        return;
-      }
-      try {
-        const parsed = JSON.parse(stdout);
-        resolve(parsed);
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        reject(new Error(`Failed to parse JSON from transcribe:\n${stdout}\n\n${stderr}\n${msg}`));
-      }
+      child.on("close", (code, signal) => {
+        activeProcess = null;
+
+        switch(signal) {
+          case('SIGKILL'):
+            reject(new Error("transcription cancelled."));
+            break;
+          case 'SIGTSTP':
+            reject(new Error("transcription paused."));
+            break;
+        }
+
+
+        if (code !== 0) {
+          reject(new Error(`transcribe exited with ${code}\n${stderr}`));
+          return;
+        }
+        try {
+          const parsed = JSON.parse(stdout);
+          resolve(parsed);
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          reject(new Error(`Failed to parse JSON from transcribe:\n${stdout}\n\n${stderr}\n${msg}`));
+        }
+      });
     });
   });
+
+ipcMain.handle("cancel-transcription", async () => {
+  // Send SIGTERM to the active process
+
+  if (activeProcess) {
+    // childProcess.kill() returns true or false if the process was successfully killed
+    return activeProcess.kill("SIGTERM");
+  }
+  return false;
 });
 
+ipcMain.handle("pause-transcription", async () => {
+  if (activeProcess) {
+    // Send SIGSTOP to the active process
+    return activeProcess.kill("SIGSTOP");
+  }
+  return false;
+});
+
+ipcMain.handle("resume-transcription", async () => {
+  if (activeProcess) {
+    // Send SIGCONT to the active process
+    return activeProcess.kill("SIGCONT");
+  }
+  return false;
+});
 
 ipcMain.handle("list-spec-files", async () => {
   const dir = path.join(repoRoot, "otter_py", "sample_specs");
@@ -301,42 +340,42 @@ ipcMain.handle(
     startSec: number,
     durSec: number
   ) => {
-  // Store snippets in a temp-ish folder that exists for packaged/dev
-  const outDir = path.join(app.getPath("userData"), "snippets");
-  fs.mkdirSync(outDir, { recursive: true });
+    // Store snippets in a temp-ish folder that exists for packaged/dev
+    const outDir = path.join(app.getPath("userData"), "snippets");
+    fs.mkdirSync(outDir, { recursive: true });
 
-  // Clamp inputs to reasonable values to avoid invalid ffmpeg args
-  const safeStart = Math.max(0, Number(startSec) || 0);
-  const safeDur = Math.max(0.05, Number(durSec) || 0.05);
+    // Clamp inputs to reasonable values to avoid invalid ffmpeg args
+    const safeStart = Math.max(0, Number(startSec) || 0);
+    const safeDur = Math.max(0.05, Number(durSec) || 0.05);
 
-  // unique-ish filename
-  const outPath = path.join(
-    outDir,
-    `snippet_${Date.now()}_${Math.floor(Math.random() * 1e6)}.wav`
-  );
+    // unique-ish filename
+    const outPath = path.join(
+      outDir,
+      `snippet_${Date.now()}_${Math.floor(Math.random() * 1e6)}.wav`
+    );
 
-  // ffmpeg: extract small WAV segment (PCM)
-  const args = [
-    "-hide_banner",
-    "-y",
-    "-ss", String(safeStart),
-    "-t", String(safeDur),
-    "-i", audioPath,
-    "-c:a", "pcm_s16le",
-    outPath
-  ];
+    // ffmpeg: extract small WAV segment (PCM)
+    const args = [
+      "-hide_banner",
+      "-y",
+      "-ss", String(safeStart),
+      "-t", String(safeDur),
+      "-i", audioPath,
+      "-c:a", "pcm_s16le",
+      outPath
+    ];
 
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn("ffmpeg", args);
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn("ffmpeg", args);
 
-    let err = "";
-    child.stderr.on("data", (d: Buffer) => err += d.toString());
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`ffmpeg failed (${code}): ${err}`));
+      let err = "";
+      child.stderr.on("data", (d: Buffer) => err += d.toString());
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg failed (${code}): ${err}`));
+      });
     });
-  });
 
-  return outPath;
-});
+    return outPath;
+  });
