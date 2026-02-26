@@ -220,7 +220,21 @@ main {
 }
 
 .devRow label { font-size: 13px; color: #333; }
-.muted { color: #666; font-size: 12px; }
+
+.word.deleted {
+  color: #999;
+  text-decoration: line-through;
+}
+
+.word.added {
+  color: #22863a;
+  font-style: italic;
+}
+
+.word.moved {
+  color: #b08800;
+  font-style: italic;
+}
 
 /* Spec JSON editor */
 #specJson {
