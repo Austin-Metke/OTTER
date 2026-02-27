@@ -100,3 +100,21 @@ As a user, I want the application to remain responsive during long-running opera
 - Canceling an operation stops processing promptly and releases system resources without corrupting the project state.
 - The application never requires a force quit to recover from a stalled operation.
 
+## Story 11: Transcript Search (Find / Ctrl + F)
+
+As a user, I want to search for words or phrases in the transcript using a find bar (Ctrl + F), so that I can quickly navigate large transcripts without scrolling manually.
+
+### Acceptance Criteria
+
+- Pressing Ctrl + F (or Cmd + F on macOS) opens a find bar in the editor.
+- The find bar allows the user to type a search query.
+- Pressing Enter selects the next matching word in the transcript.
+- Repeated presses of Enter cycle through all matching results.
+- When a match is selected:
+    The word is visually highlighted.
+    Audio playback seeks to the word’s start time.
+    The transcript scrolls to keep the word visible.
+- Changing the search query resets the search position.
+- Closing the find bar clears the active search state.
+- The feature works for both short and large transcripts.
+
