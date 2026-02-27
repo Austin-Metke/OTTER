@@ -165,6 +165,7 @@ function mustGetEl<T extends HTMLElement>(id: string): T {
 const transcriptEl = mustGetEl<HTMLDivElement>("transcript");
 const btnChoose = mustGetEl<HTMLButtonElement>("btnChoose");
 const btnTranscribe = mustGetEl<HTMLButtonElement>("btnTranscribe");
+const btnDeleteSelection = mustGetEl<HTMLButtonElement>("btnDeleteSelection");
 const statusEl = mustGetEl<HTMLDivElement>("status");
 
 function normalizeRange(a: number, b: number) {
@@ -188,6 +189,49 @@ function setPlayheadIndex(idx: number) {
     const el = transcriptEl.querySelector(`.word[data-index="${idx}"]`);
     if (el) el.classList.add("playhead");
   }
+}
+
+/**
+ * Delete selected words from the transcript.
+ *
+ * This removes words at indices [selectionStart, selectionEnd] from the
+ * in-memory words[] array and re-renders the transcript.
+ *
+ * Side effects:
+ *   • Mutates words[] (removes selected indices)
+ *   • Re-renders transcript DOM
+ *   • Clears selection and playhead
+ *   • Disables detail view (indices may be stale)
+ */
+function deleteSelectedWords() {
+  if (selectionStart == null || selectionEnd == null) {
+    setStatus("No selection to delete.", "error");
+    return;
+  }
+
+  const deleteCount = selectionEnd - selectionStart + 1;
+
+  // Remove from words array (splice modifies in place)
+  words.splice(selectionStart, deleteCount);
+
+  setStatus(`Deleted ${deleteCount} word(s).`, "success");
+
+  // Clear selection and playhead (they may reference invalid indices)
+  setSelectionRange(null, null);
+  setPlayheadIndex(-1);
+
+  // Hide detail view (its indices are now stale relative to the new words array)
+  waveDetailPane.hidden = true;
+  detailDivider.hidden = true;
+  btnDetailPlay.disabled = true;
+  btnRegion.disabled = true;
+  setDetailPlayIcon(false);
+
+  // Re-render the transcript without deleted words
+  renderTranscript(words);
+
+  // Disable delete button (no selection anymore)
+  btnDeleteSelection.disabled = true;
 }
 
 /**
@@ -217,8 +261,10 @@ function setSelectionRange(start: number | null, end: number | null) {
       idx <= selectionEnd;
     el.classList.toggle("selected", inRange);
   });
-}
 
+  // Enable/disable delete button based on whether a selection exists
+  btnDeleteSelection.disabled = selectionStart == null || selectionEnd == null;
+}
 
 // Compute a small snippet window around a word boundary.
 // This keeps the detail waveform focused on just the selected word plus context.
