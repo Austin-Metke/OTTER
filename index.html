@@ -12,6 +12,7 @@
 
       <button id="btnChoose">Choose Audio…</button>
       <button id="btnTranscribe" disabled>Transcribe</button>
+      <button id="btnDeleteSelection" disabled title="Delete selected words">Delete Selection</button>
 
       <div class="statusArea">
         <div id="status"></div>
@@ -107,12 +108,7 @@
 
       <!-- RIGHT COLUMN: Transcript only -->
       <section class="textPane">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <div class="paneTitle">Transcript</div>
-          <button id="btnRemoveSelected" disabled title="Remove selected words">
-            ✕ Remove
-          </button>
-        </div>
+        <div class="paneTitle">Transcript</div>
         <div id="transcript"></div>
       </section>
     </main>

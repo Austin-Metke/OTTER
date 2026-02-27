@@ -53,6 +53,27 @@ header {
 #status.error   { background: #fee2e2; color: #991b1b; }
 #status.success { background: #dcfce7; color: #166534; }
 
+/* Delete button styling */
+#btnDeleteSelection {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+#btnDeleteSelection:hover:not(:disabled) {
+  background: #fecaca;
+}
+
+#btnDeleteSelection:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ============================================================================
    Main Two-Pane Layout
    ========================================================================== */
@@ -247,26 +268,4 @@ main {
   color: #e8e8e8;
   font-size: 12px;
   line-height: 1.35;
-}
-
-/* Remove button styling */
-#btnRemoveSelected {
-  padding: 4px 8px;
-  font-size: 13px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-#btnRemoveSelected:hover:not(:disabled) {
-  background: #fee2e2;
-  border-color: #991b1b;
-  color: #991b1b;
-}
-
-#btnRemoveSelected:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }

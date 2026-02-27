@@ -165,6 +165,7 @@ function mustGetEl<T extends HTMLElement>(id: string): T {
 const transcriptEl = mustGetEl<HTMLDivElement>("transcript");
 const btnChoose = mustGetEl<HTMLButtonElement>("btnChoose");
 const btnTranscribe = mustGetEl<HTMLButtonElement>("btnTranscribe");
+const btnDeleteSelection = mustGetEl<HTMLButtonElement>("btnDeleteSelection");
 const statusEl = mustGetEl<HTMLDivElement>("status");
 
 function normalizeRange(a: number, b: number) {
@@ -188,6 +189,49 @@ function setPlayheadIndex(idx: number) {
     const el = transcriptEl.querySelector(`.word[data-index="${idx}"]`);
     if (el) el.classList.add("playhead");
   }
+}
+
+/**
+ * Delete selected words from the transcript.
+ *
+ * This removes words at indices [selectionStart, selectionEnd] from the
+ * in-memory words[] array and re-renders the transcript.
+ *
+ * Side effects:
+ *   • Mutates words[] (removes selected indices)
+ *   • Re-renders transcript DOM
+ *   • Clears selection and playhead
+ *   • Disables detail view (indices may be stale)
+ */
+function deleteSelectedWords() {
+  if (selectionStart == null || selectionEnd == null) {
+    setStatus("No selection to delete.", "error");
+    return;
+  }
+
+  const deleteCount = selectionEnd - selectionStart + 1;
+
+  // Remove from words array (splice modifies in place)
+  words.splice(selectionStart, deleteCount);
+
+  setStatus(`Deleted ${deleteCount} word(s).`, "success");
+
+  // Clear selection and playhead (they may reference invalid indices)
+  setSelectionRange(null, null);
+  setPlayheadIndex(-1);
+
+  // Hide detail view (its indices are now stale relative to the new words array)
+  waveDetailPane.hidden = true;
+  detailDivider.hidden = true;
+  btnDetailPlay.disabled = true;
+  btnRegion.disabled = true;
+  setDetailPlayIcon(false);
+
+  // Re-render the transcript without deleted words
+  renderTranscript(words);
+
+  // Disable delete button (no selection anymore)
+  btnDeleteSelection.disabled = true;
 }
 
 /**
@@ -218,59 +262,83 @@ function setSelectionRange(start: number | null, end: number | null) {
     el.classList.toggle("selected", inRange);
   });
 
-  updateRemoveButtonState(); // ← Add this line
+  // Enable/disable delete button based on whether a selection exists
+  btnDeleteSelection.disabled = selectionStart == null || selectionEnd == null;
+}
+
+// Compute a small snippet window around a word boundary.
+// This keeps the detail waveform focused on just the selected word plus context.
+function computeDetailWindow(start: number, end: number) {
+  const winStart = Math.max(0, start - DETAIL_PAD_BEFORE);
+  const winEnd = Math.max(winStart + 0.05, end + DETAIL_PAD_AFTER); // enforce minimum duration
+  detailWinStartAbs = winStart; // Remember where this detail starts in "absolute" time
+  return { winStart, winEnd, winDur: winEnd - winStart };
 }
 
 /**
- * Remove selected words from the transcript.
+ * Load/update the detail waveform for a selected range.
  *
- * Mutates words[] by filtering out indices in the selection range.
- * Re-indexes the remaining words and updates all dependent state.
+ * Steps:
+ *   1) Extract a short WAV snippet around the range using ffmpeg (via IPC).
+ *   2) Load the snippet into the detail WaveSurfer instance.
+ *   3) Create/update a region highlighting the range inside that snippet.
+ *   4) Seek the detail playhead to the start of the range.
  *
- * Edge cases handled:
- *   • If playhead is in the removed range, reset to -1.
- *   • If selection extends beyond remaining words, clear it.
- *   • If no selection exists, do nothing.
+ * The detail view exists to demonstrate that ASR word boundaries are approximate
+ * and that precise editing may require user refinement.
  */
-function removeSelectedWords() {
-  if (selectionStart == null || selectionEnd == null) {
-    return; // No selection, nothing to do
-  }
+async function loadDetailForRange(start: number, end: number) {
+  if (!audioPath) throw new Error("No audio loaded");
+  const { winStart, winDur } = computeDetailWindow(start, end);
 
-  const oldCount = words.length;
+  // Create a short WAV snippet around the selected word (main process uses ffmpeg)
+  const snippetPath = await otter.makeSnippet(audioPath, winStart, winDur);
 
-  // Filter out words in the selection range
-  words = words.filter((_w, idx) => idx < selectionStart || idx > selectionEnd);
+  // If the detail waveform is currently playing, stop it before swapping media
+  if (wsDetail.isPlaying()) wsDetail.pause();
 
-  const removedCount = oldCount - words.length;
+  // Enable/show detail UI now that detail audio exists
+  waveDetailPane.hidden = false;
+  detailDivider.hidden = false;
+  btnDetailPlay.disabled = false;
+  btnRegion.disabled = false;
+  setDetailPlayIcon(false);
 
-  // If playhead was in the removed range, reset it
-  if (playheadIndex >= selectionStart && playheadIndex <= selectionEnd) {
-    setPlayheadIndex(-1);
-  }
+  // Map the range's absolute times into snippet-local times
+  const localRangeStart = start - winStart;
+  const localRangeEnd = end - winStart;
 
-  // Clear selection (no longer valid after removal)
-  setSelectionRange(null, null);
+  // Attach the handler BEFORE calling load() to avoid missing "ready" in fast loads
+  wsDetail.once("ready", () => {
+    setDetailWordRegion(localRangeStart, localRangeEnd);
+    wsDetail.setTime(localRangeStart);
+  });
 
-  // Re-render the transcript without the removed words
-  renderTranscript(words);
-
-  // Provide user feedback
-  setStatus(`Removed ${removedCount} word${removedCount !== 1 ? "s" : ""}`, "info");
+  await wsDetail.load(snippetPath);
 }
 
-// Handle the "Remove Selected" button
-btnRemoveSelected.addEventListener("click", () => {
-  removeSelectedWords();
-});
-
-// Update button state: enable only when words are selected
-function updateRemoveButtonState() {
-  const hasSelection = selectionStart != null && selectionEnd != null;
-  btnRemoveSelected.disabled = !hasSelection || words.length === 0;
-}
-
-// Update button state when transcript is rendered
+/**
+ * Render the transcript as a sequence of clickable word elements and
+ * attach interaction behavior to each word.
+ *
+ * Each word is rendered as a <span> with a stable index that maps back
+ * to the transcript data model. Clicking a word performs several actions:
+ *
+ *   • Marks the word as selected in the transcript UI
+ *   • Seeks the main audio playback to the word's approximate start time
+ *   • Loads a short, focused audio snippet into the detail waveform
+ *     centered on the selected word
+ *
+ * The transcript is treated as a first-class interaction surface rather
+ * than a passive display: text selection directly drives audio navigation.
+ *
+ * This function is intentionally simple and imperative for clarity in
+ * this proof-of-concept; more advanced implementations might virtualize
+ * the transcript or decouple rendering from interaction logic.
+ *
+ * @param {Array<Object>} words - Transcript words with timing metadata
+ *                                (each entry includes at least { word, start, end })
+ */
 function renderTranscript(words: TranscriptWord[]) {
   transcriptEl.innerHTML = "";
 
@@ -323,8 +391,6 @@ function renderTranscript(words: TranscriptWord[]) {
   } else {
     setPlayheadIndex(-1);
   }
-
-  updateRemoveButtonState(); // ← Add this line
 }
 
 //==============================================================================
@@ -406,7 +472,6 @@ const detailDivider = mustGetEl<HTMLHRElement>("detailDivider");
 const detailTimeEl = mustGetEl<HTMLSpanElement>("detailTime");
 const detailBounds = mustGetEl<HTMLSpanElement>("detailBounds");
 const btnRegion = mustGetEl<HTMLButtonElement>("btnRegion");
-const btnRemoveSelected = mustGetEl<HTMLButtonElement>("btnRemoveSelected");
 
 // Create a Regions plugin instance to manage editable time ranges
 const detailRegions = WaveSurfer.Regions.create();
