@@ -107,7 +107,12 @@
 
       <!-- RIGHT COLUMN: Transcript only -->
       <section class="textPane">
-        <div class="paneTitle">Transcript</div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div class="paneTitle">Transcript</div>
+          <button id="btnRemoveSelected" disabled title="Remove selected words">
+            ✕ Remove
+          </button>
+        </div>
         <div id="transcript"></div>
       </section>
     </main>

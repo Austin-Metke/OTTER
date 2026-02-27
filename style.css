@@ -248,3 +248,25 @@ main {
   font-size: 12px;
   line-height: 1.35;
 }
+
+/* Remove button styling */
+#btnRemoveSelected {
+  padding: 4px 8px;
+  font-size: 13px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#btnRemoveSelected:hover:not(:disabled) {
+  background: #fee2e2;
+  border-color: #991b1b;
+  color: #991b1b;
+}
+
+#btnRemoveSelected:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
