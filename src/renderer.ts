@@ -242,6 +242,27 @@ function setSelectionRange(start: number | null, end: number | null) {
   });
 }
 
+// Jacob (for my reference for command-f)
+function deleteSelectedWords() {
+  if (selectionStart == null || selectionEnd == null) {
+    console.log("Delete ignored: no selection");
+    return;
+  } 
+  if (words.length === 0) return;
+  
+  const { start, end } = normalizeRange(selectionStart, selectionEnd);
+
+  words.splice(start, end - start + 1);
+
+  // Reset interaction state
+  selectionStart = null;
+  selectionEnd = null;
+  selectionAnchor = null;
+  playheadIndex = -1;
+
+  renderTranscript(words);
+}
+
 
 // Compute a small snippet window around a word boundary.
 // This keeps the detail waveform focused on just the selected word plus context.
@@ -404,9 +425,15 @@ function renderTranscript(words: TranscriptWord[]) {
 //==============================================================================
 
 const btnPlay = mustGetEl<HTMLButtonElement>("btnPlay");
+const btnDelete = mustGetEl<HTMLButtonElement>("btnDelete");
 const timeEl = mustGetEl<HTMLSpanElement>("time");
 const progressEl = mustGetEl<HTMLProgressElement>("transcribeProgress");
 const fnameEl = mustGetEl<HTMLSpanElement>("loadedFile");
+
+btnDelete.addEventListener("click", (e) => {
+  e.preventDefault();
+  deleteSelectedWords();
+})
 
 // Switch between play and pause icons
 function setPlayIcon(isPlaying: boolean) {
@@ -881,4 +908,7 @@ const WORD_REGION_COLOR = getCssVar(
 );
 
 //Will delete later, just to see test highlighting some words
-renderTranscript(mockWords);
+
+words = [...mockWords];
+renderTranscript(words);
+
