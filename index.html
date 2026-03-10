@@ -13,6 +13,9 @@
       <button id="btnChoose">Choose Audio…</button>
       <button id="btnTranscribe" disabled>Transcribe</button>
 
+      <label for="modeSelect">Quality:</label>
+      <select id="modeSelect"></select>
+
       <div class="statusArea">
         <div id="status"></div>
         <progress id="transcribeProgress" value="0" max="100" hidden></progress>
@@ -77,17 +80,14 @@
           </summary>
 
           <div class="devBody">
-            <!-- Spec controls -->
+            <!-- Spec customization (selection moved to header) -->
             <div class="devSection">
               <div class="devSectionTitle">Transcription Pipeline</div>
 
               <div class="devRow">
-                <label for="specSelect">Spec:</label>
-                <select id="specSelect"></select>
-
                 <label class="checkbox">
                   <input type="checkbox" id="chkCustomSpec" />
-                  Customize
+                  Customize JSON
                 </label>
               </div>
 

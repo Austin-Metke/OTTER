@@ -690,7 +690,16 @@ otter.onTranscribeProgress((pct: number) => {
 //
 //==============================================================================
 
-const specSelect = mustGetEl<HTMLSelectElement>("specSelect");
+// Friendly display names for known spec files; unknown files fall back to their filename.
+const SPEC_FRIENDLY_LABELS: Record<string, string> = {
+  "fw.json":          "Quick",
+  "fw_cwt.json":      "Standard",
+  "fw_asw_cwt.json":  "Accurate",
+  "default_spec.json":"Best Quality",
+  "wx_asw_cwt.json":  "Best Quality (alt)",
+};
+
+const specSelect = mustGetEl<HTMLSelectElement>("modeSelect");
 const chkCustomSpec = mustGetEl<HTMLInputElement>("chkCustomSpec");
 const customSpecArea = mustGetEl<HTMLDivElement>("customSpecArea");
 const specJsonEl = mustGetEl<HTMLTextAreaElement>("specJson");
@@ -735,7 +744,7 @@ async function populateSpecSelect() {
   for (const f of files) {
     const opt = document.createElement("option");
     opt.value = f;
-    opt.textContent = f;
+    opt.textContent = SPEC_FRIENDLY_LABELS[f] ?? f;
     specSelect.appendChild(opt);
   }
 
