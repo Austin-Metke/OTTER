@@ -73,6 +73,9 @@ type OtterApi = {
   listSpecFiles: () => Promise<string[]>;
   readSpecFile: (name: string) => Promise<string>;
   readDefaultSpec: () => Promise<string>;
+  pauseTranscription: () => Promise<boolean>;
+  resumeTranscription: () => Promise<boolean>;
+  cancelTranscription: () => Promise<boolean>;
 };
 
 declare global {
@@ -165,7 +168,21 @@ function mustGetEl<T extends HTMLElement>(id: string): T {
 const transcriptEl = mustGetEl<HTMLDivElement>("transcript");
 const btnChoose = mustGetEl<HTMLButtonElement>("btnChoose");
 const btnTranscribe = mustGetEl<HTMLButtonElement>("btnTranscribe");
+const btnPause = mustGetEl<HTMLButtonElement>("btnPause");
+const btnStop = mustGetEl<HTMLButtonElement>("btnStop");
 const statusEl = mustGetEl<HTMLDivElement>("status");
+
+let isPaused = false;
+
+function setTranscribingState(active: boolean) {
+  btnTranscribe.hidden = active;
+  btnPause.hidden = !active;
+  btnStop.hidden = !active;
+  if (!active) {
+    isPaused = false;
+    btnPause.textContent = "⏸ Pause";
+  }
+}
 
 function normalizeRange(a: number, b: number) {
   return a <= b ? { start: a, end: b } : { start: b, end: a };
@@ -607,9 +624,9 @@ btnTranscribe.addEventListener("click", async () => {
 
   try {
     btnChoose.disabled = true;
-    btnTranscribe.disabled = true;
     progressEl.value = 0;
     progressEl.hidden = false;
+    setTranscribingState(true);
 
     const result = await otter.transcribeAudio(audioPath, getActiveSpecArg());
     words = Array.isArray(result) ? result : (result.words || []);
@@ -619,13 +636,38 @@ btnTranscribe.addEventListener("click", async () => {
     renderTranscript(words);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    setStatus("Transcription failed (see logs).", "error");
-    appendLog("\nERROR:\n" + msg + "\n");
+    if (msg.includes("cancelled")) {
+      setStatus("Transcription cancelled.", "info");
+    } else {
+      setStatus("Transcription failed (see logs).", "error");
+      appendLog("\nERROR:\n" + msg + "\n");
+    }
   } finally {
     btnChoose.disabled = false;
     btnTranscribe.disabled = false;
+    setTranscribingState(false);
     progressEl.hidden = true;
   }
+});
+
+// Handle the "Pause / Resume" button
+btnPause.addEventListener("click", async () => {
+  if (!isPaused) {
+    await otter.pauseTranscription();
+    isPaused = true;
+    btnPause.textContent = "▶ Resume";
+    setStatus("Transcription paused.", "info");
+  } else {
+    await otter.resumeTranscription();
+    isPaused = false;
+    btnPause.textContent = "⏸ Pause";
+    setStatus("Transcribing…", "working");
+  }
+});
+
+// Handle the "Stop" button
+btnStop.addEventListener("click", async () => {
+  await otter.cancelTranscription();
 });
 
 // Handle the "Choose File" button
