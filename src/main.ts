@@ -264,11 +264,12 @@ ipcMain.handle(
   });
 
 ipcMain.handle("cancel-transcription", async () => {
-  // Send SIGTERM to the active process
-
+  // Send SIGKILL (not SIGTERM) so cancellation works even when the process
+  // is paused via SIGSTOP — a stopped process ignores SIGTERM.
   if (activeProcess) {
-    // childProcess.kill() returns true or false if the process was successfully killed
-    return activeProcess.kill("SIGTERM");
+    // Resume first if stopped, then kill
+    activeProcess.kill("SIGCONT");
+    return activeProcess.kill("SIGKILL");
   }
   return false;
 });
