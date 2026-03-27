@@ -125,6 +125,7 @@ let selectionStart: number | null = null;
 let selectionEnd: number | null = null;
 let selectionAnchor: number | null = null;
 let playheadIndex = -1;
+let breaklineHistory: number[] = [];
 
 //
 // Utility Functions
@@ -215,6 +216,25 @@ window.addEventListener("keydown", (event: KeyboardEvent) => {
     findBar.hidden = true;
     clearSearchHighlights();
   }
+
+  //Breakline feature
+  if(event.key == "Enter"){
+    if(selectionEnd !== null){
+     insertBreakline(selectionEnd);
+     breaklineHistory.push(selectionEnd);
+    }
+  }
+
+  //Remove/undo breakline feature
+  if(event.key === "Backspace" || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z"))
+  {
+    const lastIndex = breaklineHistory.pop();
+    if(lastIndex!== undefined)
+    {
+      removeBreakline(lastIndex);
+    }
+  }
+
 });
 
 findClose.addEventListener("click", () => {
@@ -290,6 +310,13 @@ findInput.addEventListener("keydown", (event: KeyboardEvent) => {
     }
 
   });
+
+
+  //Breakline feature
+  //Breakline feature
+  window.addEventListener("keydown",  (event: KeyboardEvent)=> {
+    
+  })
 
   //Reset function for searching
 function clearSearchHighlights() {
@@ -379,6 +406,39 @@ function setSelectionRange(start: number | null, end: number | null) {
       idx <= selectionEnd;
     el.classList.toggle("selected", inRange);
   });
+}
+
+//Helper function for breakline feature
+
+function insertBreakline(index: number)
+{
+  const wordEl = transcriptEl.querySelector(
+    `.word[data-index="${index}"]`
+  ) as HTMLElement | null;
+
+  if(!wordEl)
+    return;
+
+  const br = document.createElement("br");
+  wordEl.after(br);
+
+}
+
+//To undo breakline
+function removeBreakline(index: number)
+{
+  const wordEl = transcriptEl.querySelector(
+    `.word[data-index="${index}"]`
+  ) as HTMLElement | null;
+
+  if(!wordEl)
+    return;
+
+  const nextNode = wordEl.nextSibling;
+  if (nextNode && nextNode.nodeName === "BR") {
+    nextNode.remove();
+  };
+
 }
 
 
@@ -535,6 +595,8 @@ function renderTranscript(words: TranscriptWord[]) {
   } else {
     setPlayheadIndex(-1);
   }
+
+  
 }
 
 //==============================================================================
