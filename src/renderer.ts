@@ -50,6 +50,29 @@ type TranscriptWord = {
   [key: string]: unknown;
 };
 
+const mockWords: TranscriptWord[] = [
+  { word: "te1", start: 0.0, end: 0.5 },
+  { word: "test2", start: 0.5, end: 1.0 },
+  { word: "test3", start: 1.0, end: 1.3 },
+  { word: "test4", start: 1.3, end: 1.5 },
+  { word: "hello5", start: 1.5, end: 1.6 },
+  { word: "test6", start: 1.6, end: 2.0 },
+  { word: "test7", start: 2.0, end: 2.8 },
+  { word: "test8", start: 2.8, end: 3.0 },
+  { word: "test9", start: 3.0, end: 3.6 },
+  { word: "test10", start: 3.6, end: 4.2 },
+  { word: "test11", start: 4.2, end: 4.5 },
+  { word: "hero12", start: 4.5, end: 5.0 },
+  { word: "test13", start: 5.0, end: 5.4 },
+  { word: "hello14", start: 5.4, end: 5.6 },
+  { word: "test15", start: 5.6, end: 6.1 },
+  { word: "test16", start: 6.1, end: 6.3 },
+  { word: "test17", start: 6.3, end: 6.7 },
+  { word: "tent18", start: 6.7, end: 7.2 },
+  { word: "test19", start: 7.2, end: 7.4 },
+  { word: "test20", start: 7.4, end: 8.0 },
+];
+
 type TranscriptResult =
   | TranscriptWord[]
   | {
@@ -102,6 +125,7 @@ let selectionStart: number | null = null;
 let selectionEnd: number | null = null;
 let selectionAnchor: number | null = null;
 let playheadIndex = -1;
+let breaklineHistory: number[] = [];
 
 //
 // Utility Functions
@@ -171,6 +195,171 @@ function normalizeRange(a: number, b: number) {
   return a <= b ? { start: a, end: b } : { start: b, end: a };
 }
 
+
+// For search function
+const findBar = document.getElementById("searchBar")!;
+const findInput = document.getElementById("searchInput") as HTMLInputElement;
+const findClose = document.getElementById("findClose")!;
+findBar.hidden = true;
+
+
+//Ctrl + F keyboard shortcut
+window.addEventListener("keydown", (event: KeyboardEvent) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+    event.preventDefault();
+    findBar.hidden = false;
+    findInput.focus();
+    findInput.select();
+  }
+
+  if (event.key === "Escape") {
+    findBar.hidden = true;
+    clearSearchHighlights();
+  }
+
+  //Breakline feature
+  if(event.key == "Enter"){
+    if(selectionEnd !== null){
+     insertBreakline(selectionEnd);
+     breaklineHistory.push(selectionEnd);
+    }
+  }
+
+  //Remove/undo breakline feature
+  if(event.key === "Backspace" || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z"))
+  {
+    const lastIndex = breaklineHistory.pop();
+    if(lastIndex!== undefined)
+    {
+      removeBreakline(lastIndex);
+    }
+  }
+
+});
+
+findClose.addEventListener("click", () => {
+  findBar.hidden = true;
+  clearSearchHighlights();
+});
+
+
+let lastFoundIndex = -1;
+let lastSearchQuery = "";
+//Search word (Enter key)
+findInput.addEventListener("keydown", (event: KeyboardEvent) => {
+    if(event.key !== "Enter")
+    {
+      return;
+    }
+   
+    const searchQuery = findInput.value.trim().toLowerCase();
+    if(!searchQuery) 
+    {
+      return;
+    }
+
+    // If the user types in a new word, start from the beginning again
+    if (searchQuery !== lastSearchQuery) {
+        lastFoundIndex = -1;
+        lastSearchQuery = searchQuery;
+      }
+    let found = false;
+      // Go to the next word (same word)
+    for(let i = lastFoundIndex + 1; i < words.length; i++)
+    {
+      if(words[i].word.toLowerCase().includes(searchQuery))
+      {
+        lastFoundIndex=  i;
+        found = true;
+        lastSearchQuery = searchQuery;
+      const wordFound = words[i];
+      setSelectionRange(i, i); //highlights the word
+      ws.setTime(Number(wordFound.start) + SEEK_EPS); // also adjusts the word's start time
+
+      const wordElement = transcriptEl.querySelector(
+      `.word[data-index="${i}"]`
+      ) as HTMLElement | null;
+
+      wordElement?.scrollIntoView({ block: "center", behavior: "smooth" });
+      break;
+    }
+
+    }
+
+   if(!found)
+    {
+      //Wrap around search
+      for(let i = 0; i < lastFoundIndex; i++)
+      {
+        if(words[i].word.toLowerCase().includes(searchQuery))
+        {
+          lastFoundIndex = i;
+            lastSearchQuery = searchQuery;
+      const wordFound = words[i];
+      setSelectionRange(i, i); //highlights the word
+      ws.setTime(Number(wordFound.start) + SEEK_EPS); // also adjusts the word's start time
+
+      const wordElement = transcriptEl.querySelector(
+      `.word[data-index="${i}"]`
+      ) as HTMLElement | null;
+
+      wordElement?.scrollIntoView({ block: "center", behavior: "smooth" });
+      break;
+        }
+      }
+    }
+
+  });
+
+
+  //Breakline feature
+  //Breakline feature
+  window.addEventListener("keydown",  (event: KeyboardEvent)=> {
+    
+  })
+
+  //Reset function for searching
+function clearSearchHighlights() {
+
+  const transcriptWords = transcriptEl.querySelectorAll(".word");
+
+  for (let i = 0; i < transcriptWords.length; i++) {
+
+    const wordElement = transcriptWords[i] as HTMLElement;
+    const index = Number(wordElement.dataset.index);
+    const wordText = words[index].word;    
+    wordElement.innerHTML = wordText + " ";
+  }
+}
+
+  //Highlighting the user's entry in the search bar
+  findInput.addEventListener("input", () =>{
+    const searchQuery = findInput.value.trim().toLowerCase();
+    const transcriptWords = transcriptEl.querySelectorAll(".word");
+   
+    for(let i = 0; i < transcriptWords.length; i++)
+    {
+      const wordElement = transcriptWords[i] as HTMLElement;
+      const index = Number(wordElement.dataset.index);
+      const wordText = words[index].word;
+      wordElement.innerHTML = wordText + " ";
+      const matchPosition = wordText.toLowerCase().indexOf(searchQuery)
+      if(matchPosition === -1)
+      {
+        continue;
+      }
+      
+      //Slicing the highlights
+      const before = wordText.slice(0,matchPosition);
+      const matchingChar = wordText.slice(matchPosition, matchPosition + searchQuery.length);
+      const after = wordText.slice(matchPosition + searchQuery.length);
+      wordElement.innerHTML=  before +'<span class="highlight">' + matchingChar + '</span>' +after +" ";
+    }
+
+})
+
+
+
 /**
  * Update the visual "playhead" state to reflect the word currently
  * under the audio playhead. This is independent from any text selection.
@@ -217,6 +406,39 @@ function setSelectionRange(start: number | null, end: number | null) {
       idx <= selectionEnd;
     el.classList.toggle("selected", inRange);
   });
+}
+
+//Helper function for breakline feature
+
+function insertBreakline(index: number)
+{
+  const wordEl = transcriptEl.querySelector(
+    `.word[data-index="${index}"]`
+  ) as HTMLElement | null;
+
+  if(!wordEl)
+    return;
+
+  const br = document.createElement("br");
+  wordEl.after(br);
+
+}
+
+//To undo breakline
+function removeBreakline(index: number)
+{
+  const wordEl = transcriptEl.querySelector(
+    `.word[data-index="${index}"]`
+  ) as HTMLElement | null;
+
+  if(!wordEl)
+    return;
+
+  const nextNode = wordEl.nextSibling;
+  if (nextNode && nextNode.nodeName === "BR") {
+    nextNode.remove();
+  };
+
 }
 
 
@@ -295,6 +517,8 @@ async function loadDetailForRange(start: number, end: number) {
  */
 function renderTranscript(words: TranscriptWord[]) {
   transcriptEl.innerHTML = "";
+  let isDragging = false; 
+  let dragStart: number | null = null; //Which word index the drag started on
 
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
@@ -328,8 +552,34 @@ function renderTranscript(words: TranscriptWord[]) {
       }
     });
 
+    //Start selection when user clicks on a word
+    span.addEventListener('mousedown', async(event: MouseEvent) => {
+      event.preventDefault();
+      isDragging =true;
+      dragStart = i;
+      setPlayheadIndex(-1); 
+      setSelectionRange(i, i);
+    });
+
+      //While the user is highlighting words, the selection range gets updated
+      span.addEventListener('mouseenter', () => {
+      if (isDragging && dragStart !== null) 
+        {
+        setSelectionRange(dragStart, i);  
+      }
+    });
+
+      
+
     transcriptEl.appendChild(span);
   }
+
+    // Stop dragging when mouse is released anywhere
+      document.addEventListener('mouseup', () => {
+        isDragging = false;
+        dragStart = null; // reset drag start index
+      });
+
 
   // Re-apply selection and playhead after re-render (e.g., new transcript)
   if (selectionStart != null && selectionEnd != null) {
@@ -345,6 +595,8 @@ function renderTranscript(words: TranscriptWord[]) {
   } else {
     setPlayheadIndex(-1);
   }
+
+  
 }
 
 //==============================================================================
@@ -751,6 +1003,7 @@ async function populateSpecSelect() {
 
 // Events
 
+
 chkCustomSpec.addEventListener("change", async () => {
   if (chkCustomSpec.checked) {
     // Enter customize mode: show textarea and seed it from selected file
@@ -829,3 +1082,7 @@ const WORD_REGION_COLOR = getCssVar(
   "--word-region-color",
   "rgba(255, 200, 0, 0.35)"
 );
+
+//Will delete later, just to see test highlighting some words
+words = mockWords;
+renderTranscript(words);

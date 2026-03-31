@@ -172,6 +172,31 @@ main {
   outline-offset: 1px;
 }
 
+/* Search bar for Ctrl+F */
+#searchBar {
+  position: absolute;
+  top: 8px;
+  right: 8px;  
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  z-index: 10;
+}
+
+#searchBar[hidden] {
+  display: none !important;
+}
+
+
+
+#searchInput {
+  width: 160px;
+}
+
+
 /* ============================================================================
    Developer Panel (bottom of left column)
    ========================================================================== */
@@ -247,4 +272,9 @@ main {
   color: #e8e8e8;
   font-size: 12px;
   line-height: 1.35;
+}
+
+/* Highlight search words */
+.highlight {
+  background: #f4a949;
 }
