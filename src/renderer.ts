@@ -127,6 +127,12 @@ let selectionAnchor: number | null = null;
 let playheadIndex = -1;
 
 let historyStack: TranscriptWord[][] = [];
+let redoStack: TranscriptWord[][] = [];
+
+function clearTranscriptEditHistory() {
+  historyStack = [];
+  redoStack = [];
+}
 
 //
 // Utility Functions
@@ -258,6 +264,8 @@ function deleteSelectedWords() {
 
   // Save current transcript state for undo
   historyStack.push(JSON.parse(JSON.stringify(words)));
+  // New mutation invalidates any redo path.
+  redoStack = [];
 
   // Remove selected words
   words.splice(start, end - start + 1);
@@ -280,8 +288,33 @@ function undoDelete() {
     return;
   }
 
+  // Save current state so we can redo it.
+  redoStack.push(JSON.parse(JSON.stringify(words)));
+
   // Restore previous transcript
   words = historyStack.pop()!;
+
+  // Clear selection state
+  selectionStart = null;
+  selectionEnd = null;
+  selectionAnchor = null;
+  playheadIndex = -1;
+
+  // Re-render transcripts
+  renderTranscript(words);
+}
+
+function redoDelete() {
+  // Exit if no redo history exists
+  if (redoStack.length === 0) {
+    return;
+  }
+
+  // Current state becomes undo-able again.
+  historyStack.push(JSON.parse(JSON.stringify(words)));
+
+  // Restore the redone state
+  words = redoStack.pop()!;
 
   // Clear selection state
   selectionStart = null;
@@ -469,6 +502,34 @@ btnDelete.addEventListener("click", (e) => {
 btnUndo.addEventListener("click", (e) => {
   e.preventDefault();
   undoDelete();
+});
+
+// Keyboard shortcuts for transcript mutation history.
+window.addEventListener("keydown", (event: KeyboardEvent) => {
+  const isUndoCombo =
+    (event.ctrlKey || event.metaKey) &&
+    !event.shiftKey &&
+    !event.altKey &&
+    event.key.toLowerCase() === "z";
+
+  const isRedoCombo =
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    (
+      (event.shiftKey && event.key.toLowerCase() === "z") ||
+      (!event.shiftKey && event.key.toLowerCase() === "y")
+    );
+
+  if (isUndoCombo) {
+    event.preventDefault();
+    undoDelete();
+    return;
+  }
+
+  if (isRedoCombo) {
+    event.preventDefault();
+    redoDelete();
+  }
 });
 
 
@@ -727,6 +788,8 @@ btnTranscribe.addEventListener("click", async () => {
     progressEl.hidden = false;
 
     const result = await otter.transcribeAudio(audioPath, getActiveSpecArg());
+    // New transcript replaces the previous editing session state.
+    clearTranscriptEditHistory();
     words = Array.isArray(result) ? result : (result.words || []);
     const lang = Array.isArray(result) ? undefined : result.language;
     const langSuffix = lang ? `, lang=${lang}` : "";
@@ -747,6 +810,8 @@ btnTranscribe.addEventListener("click", async () => {
 btnChoose.addEventListener("click", async () => {
   transcriptEl.innerHTML = "";
   logEl.textContent = "";
+  // Choosing a new file starts a fresh transcript/editing session.
+  clearTranscriptEditHistory();
   setStatus("Choosing file…", "info");
 
   audioPath = await otter.chooseAudioFile();
