@@ -319,49 +319,6 @@ async function loadDetailForRange(start: number, end: number) {
 }
 
 /**
- * Delete selected words from the transcript.
- *
- * This removes words at indices [selectionStart, selectionEnd] from the
- * in-memory words[] array and re-renders the transcript.
- * It also clears the selection and playhead, since they may now reference
- * invalid indices after deletion.
- *
- * This is a non-destructive operation for demonstration purposes;
- * it does not modify the source audio or persist changes.
- * It serves to illustrate how transcript-driven editing might work in principle.
- */ 
-function deleteSelectedWords() {
-  if (selectionStart == null || selectionEnd == null) {
-    setStatus("No selection to delete.", "error");
-    return;
-  }
-
-  const deleteCount = selectionEnd - selectionStart + 1;
-
-  // Remove from words array (splice modifies in place)
-  words.splice(selectionStart, deleteCount);
-
-  setStatus(`Deleted ${deleteCount} word(s).`, "success");
-
-  // Clear selection and playhead (they may reference invalid indices)
-  setSelectionRange(null, null);
-  setPlayheadIndex(-1);
-
-  // Hide detail view (its indices are now stale relative to the new words array)
-  waveDetailPane.hidden = true;
-  detailDivider.hidden = true;
-  btnDetailPlay.disabled = true;
-  btnRegion.disabled = true;
-  setDetailPlayIcon(false);
-
-  // Re-render the transcript without deleted words
-  renderTranscript(words);
-
-  // Disable delete button (no selection anymore)
-  btnDeleteSelection.disabled = true;
-}
-
-/**
  * Render the transcript as a sequence of clickable word elements and
  * attach interaction behavior to each word.
  *
