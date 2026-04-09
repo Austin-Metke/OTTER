@@ -196,7 +196,9 @@ function setPlayheadIndex(idx: number) {
  * Delete selected words from the transcript.
  *
  * This removes words at indices [selectionStart, selectionEnd] from the
- * in-memory words[] array and re-renders the transcript.
+ * in-memory words[] array and re-renders the transcript. The original audio
+ * file remains unchanged, and playback continues to use the source audio
+ * with its original timestamps.
  *
  * Side effects:
  *   • Mutates words[] (removes selected indices)
@@ -207,6 +209,12 @@ function setPlayheadIndex(idx: number) {
 function deleteSelectedWords() {
   if (selectionStart == null || selectionEnd == null) {
     setStatus("No selection to delete.", "error");
+    return;
+  }
+
+  // Ensure selection indices are within bounds and valid
+  if (selectionStart < 0 || selectionEnd >= words.length || selectionStart > selectionEnd) {
+    setStatus("Invalid selection.", "error");
     return;
   }
 
@@ -263,8 +271,8 @@ function setSelectionRange(start: number | null, end: number | null) {
     el.classList.toggle("selected", inRange);
   });
 
-  // Enable/disable delete button based on whether a selection exists
-  btnDeleteSelection.disabled = selectionStart == null || selectionEnd == null;
+  // Enable/disable delete button based on whether a valid selection exists
+  btnDeleteSelection.disabled = !(selectionStart != null && selectionEnd != null && selectionStart >= 0 && selectionEnd < words.length && selectionStart <= selectionEnd);
 }
 
 // Compute a small snippet window around a word boundary.
@@ -938,3 +946,10 @@ const WORD_REGION_COLOR = getCssVar(
 
 // Initialize drag selection global mouseup handler
 initializeDragEnd();
+
+// Add keyboard support for deleting selected words
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Delete' || event.key === 'Backspace') {
+    deleteSelectedWords();
+  }
+});
