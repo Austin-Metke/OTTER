@@ -33,6 +33,11 @@ from otter_py.util import eprint, run_with_stdout_redirect
 from otter_py.cacheUtil import _cache_key, _cache_dir, _load_cache, _save_cache
 
 
+# Global constants
+MIN_MINUTES = 20
+MIN_SECONDS = 60
+PARALLEL_THRESHOLD = MIN_MINUTES * MIN_SECONDS  # seconds; if audio is longer than this, may use parallel path
+
 class ControlManager:
     """
     Reads JSON control messages from stdin.
@@ -206,7 +211,6 @@ def main(argv: Optional[list[str]] = None) -> int:
                 eprint(f"INFO:audio duration is {duration:.2f} seconds")
             except Exception:
                 duration = 0
-            PARALLEL_THRESHOLD = 20 * 60  # seconds; if audio is longer than this, may use parallel path
             use_parallel = duration > PARALLEL_THRESHOLD
             t_id = (spec.get("transcriber") or {}).get("id")
             if use_parallel and t_id != "whisperx_vad":
@@ -221,7 +225,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
                 if use_parallel:
                     from otter_py.parallel_transcribe import transcribe_parallel
-                    eprint(f"INFO:audio duration exceeds {PARALLEL_THRESHOLD/60:.0f} minutes, enabling parallel execution (if supported by transcriber)")
+                    eprint(f"INFO:audio duration exceeds {PARALLEL_THRESHOLD/MIN_SECONDS} minutes, enabling parallel execution (if supported by transcriber)")
                     from otter_py.pipeline_registry import _POSTS
                     import time
 
