@@ -166,7 +166,6 @@ function mustGetEl<T extends HTMLElement>(id: string): T {
 const transcriptEl = mustGetEl<HTMLDivElement>("transcript");
 const btnChoose = mustGetEl<HTMLButtonElement>("btnChoose");
 const btnTranscribe = mustGetEl<HTMLButtonElement>("btnTranscribe");
-const btnDeleteSelection = mustGetEl<HTMLButtonElement>("btnDeleteSelection");
 const statusEl = mustGetEl<HTMLDivElement>("status");
 
 function normalizeRange(a: number, b: number) {
@@ -206,43 +205,6 @@ function setPlayheadIndex(idx: number) {
  *   • Clears selection and playhead
  *   • Disables detail view (indices may be stale)
  */
-function deleteSelectedWords() {
-  if (selectionStart == null || selectionEnd == null) {
-    setStatus("No selection to delete.", "error");
-    return;
-  }
-
-  // Ensure selection indices are within bounds and valid
-  if (selectionStart < 0 || selectionEnd >= words.length || selectionStart > selectionEnd) {
-    setStatus("Invalid selection.", "error");
-    return;
-  }
-
-  const deleteCount = selectionEnd - selectionStart + 1;
-
-  // Remove from words array (splice modifies in place)
-  words.splice(selectionStart, deleteCount);
-
-  setStatus(`Deleted ${deleteCount} word(s).`, "success");
-
-  // Clear selection and playhead (they may reference invalid indices)
-  setSelectionRange(null, null);
-  setPlayheadIndex(-1);
-
-  // Hide detail view (its indices are now stale relative to the new words array)
-  waveDetailPane.hidden = true;
-  detailDivider.hidden = true;
-  btnDetailPlay.disabled = true;
-  btnRegion.disabled = true;
-  setDetailPlayIcon(false);
-
-  // Re-render the transcript without deleted words
-  renderTranscript(words);
-
-  // Disable delete button (no selection anymore)
-  btnDeleteSelection.disabled = true;
-}
-
 /**
  * Update the visual selection state for a range of words.
  *
@@ -270,9 +232,6 @@ function setSelectionRange(start: number | null, end: number | null) {
       idx <= selectionEnd;
     el.classList.toggle("selected", inRange);
   });
-
-  // Enable/disable delete button based on whether a valid selection exists
-  btnDeleteSelection.disabled = !(selectionStart != null && selectionEnd != null && selectionStart >= 0 && selectionEnd < words.length && selectionStart <= selectionEnd);
 }
 
 // Compute a small snippet window around a word boundary.
@@ -767,11 +726,6 @@ btnChoose.addEventListener("click", async () => {
   fnameEl.textContent = shortenFilenameMiddle(fname);
 });
 
-// Handle the "Delete Selection" button
-btnDeleteSelection.addEventListener("click", () => {
-  deleteSelectedWords();
-});
-
 
 //==============================================================================
 //
@@ -946,10 +900,3 @@ const WORD_REGION_COLOR = getCssVar(
 
 // Initialize drag selection global mouseup handler
 initializeDragEnd();
-
-// Add keyboard support for deleting selected words
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Delete' || event.key === 'Backspace') {
-    deleteSelectedWords();
-  }
-});
