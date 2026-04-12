@@ -48,6 +48,7 @@ type TranscriptWord = {
   start: number;
   end: number;
   [key: string]: unknown;
+  breakAfter?: number;
 };
 
 type TranscriptResult =
@@ -82,6 +83,7 @@ type PieceEntry = {
   word: string;
   sourceStart: number;
   sourceEnd: number;
+  breakAfter?: number;
 };
 
 type Piece = {
@@ -168,6 +170,7 @@ type UndoSnapshot = {
   pieces: Piece[];
   originalBuffer: PieceEntry[];
   addBuffer: PieceEntry[];
+  words: TranscriptWord[];
 };
 
 let pieceTable: PieceTableData | null = null;
@@ -258,6 +261,7 @@ function buildPieceTableFromTranscript(
     word: w.word,
     sourceStart: w.start,
     sourceEnd: w.end,
+    breakAfter: w.breakAfter,
   }));
 
   return {
@@ -330,6 +334,7 @@ function snapshotState(pt: PieceTableData): UndoSnapshot {
     pieces: pt.pieces.map(p => ({ ...p })),
     originalBuffer: pt.originalBuffer.map(e => ({ ...e })),
     addBuffer: pt.addBuffer.map(e => ({ ...e })),
+    words: words.map(w => ({ ...w })),
   };
 }
 
@@ -340,9 +345,10 @@ function pushUndo(): void {
 }
 
 function restoreSnapshot(pt: PieceTableData, snap: UndoSnapshot): void {
-  pt.pieces = snap.pieces;
-  pt.originalBuffer = snap.originalBuffer;
-  pt.addBuffer = snap.addBuffer;
+  pt.pieces = snap.pieces.map(p => ({ ...p }));
+  pt.originalBuffer = snap.originalBuffer.map(e => ({ ...e }));
+  pt.addBuffer = snap.addBuffer.map(e => ({ ...e }));
+  words = snap.words.map(w => ({ ...w }));
   pt.modifiedAt = new Date().toISOString();
 }
 
@@ -350,7 +356,6 @@ function performUndo(): boolean {
   if (!pieceTable || undoStack.length === 0) return false;
   redoStack.push(snapshotState(pieceTable));
   restoreSnapshot(pieceTable, undoStack.pop()!);
-  syncWordsFromPieceTable();
   return true;
 }
 
@@ -358,18 +363,36 @@ function performRedo(): boolean {
   if (!pieceTable || redoStack.length === 0) return false;
   undoStack.push(snapshotState(pieceTable));
   restoreSnapshot(pieceTable, redoStack.pop()!);
-  syncWordsFromPieceTable();
   return true;
+}
+
+function syncBreakAfterToPieceTable(): void {
+  if (!pieceTable) return;
+  const viewEntries = getViewEntries(pieceTable);
+  for (let i = 0; i < viewEntries.length && i < words.length; i++) {
+    viewEntries[i].entry.breakAfter = words[i].breakAfter;
+  }
 }
 
 function syncWordsFromPieceTable(): void {
   if (!pieceTable) return;
+
+  const oldWords = words;
   const viewEntries = getViewEntries(pieceTable);
-  words = viewEntries.map(ve => ({
+
+  const newWords: TranscriptWord[] = viewEntries.map(ve => ({
     word: ve.entry.word,
     start: ve.entry.sourceStart,
     end: ve.entry.sourceEnd,
   }));
+
+  for (let i = 0; i < newWords.length; i++) {
+    if (oldWords[i]?.breakAfter) {
+      newWords[i].breakAfter = oldWords[i].breakAfter;
+    }
+  }
+
+  words = newWords;
 }
 
 async function refreshDetailIfActive(): Promise<void> {
@@ -384,6 +407,7 @@ async function refreshDetailIfActive(): Promise<void> {
     console.error("Failed to refresh detail view:", err);
   }
 }
+
 
 /**
  * Change the status of entries in the visual index range [visualStart, visualEnd]
@@ -796,6 +820,8 @@ const findBar = document.getElementById("searchBar")!;
 const findInput = document.getElementById("searchInput") as HTMLInputElement;
 const findClose = document.getElementById("findClose")!;
 findBar.hidden = true;
+  
+
 
 
 //Ctrl + F keyboard shortcut
@@ -1408,6 +1434,14 @@ function renderTranscript(words: TranscriptWord[]) {
     });
 
     transcriptEl.appendChild(span);
+
+    const breakCount = words[i].breakAfter ?? 0;
+    for (let j = 0; j < breakCount; j++) 
+    {
+      transcriptEl.appendChild(document.createElement("br"));
+    }
+
+    
   }
 
   // Re-apply selection and playhead after re-render (e.g., new transcript)
@@ -2002,6 +2036,23 @@ const btnSaveEdl = mustGetEl<HTMLButtonElement>("btnSaveEdl");
 const btnLoadEdl = mustGetEl<HTMLButtonElement>("btnLoadEdl");
 const btnSaveEdits = mustGetEl<HTMLButtonElement>("btnSaveEdits");
 
+//helper function for removing one breakline
+function removeOneBreakline(): boolean {
+  if (selectedIndices.length === 0) return false;
+
+  const lastSelected = selectedIndices[selectedIndices.length - 1];
+  const currentBreaks = words[lastSelected]?.breakAfter ?? 0;
+
+  if (currentBreaks <= 0) return false;
+
+  pushUndo();
+  words[lastSelected].breakAfter = currentBreaks - 1;
+  renderTranscript(words);
+  updateEditButtonStates();
+  return true;
+}
+
+
 /**
  * Remove (soft-delete) the currently selected words.
  *
@@ -2112,22 +2163,46 @@ document.addEventListener("keydown", (e: KeyboardEvent) => {
     return;
   }
 
-  if (e.key === "Delete" || e.key === "Backspace") {
-    e.preventDefault();
-    removeSelection();
-    return;
-  }
+  if (e.key === "Backspace") {
+  e.preventDefault();
 
-  if (e.key === "r" || e.key === "R") {
-    restoreSelection();
-    return;
+  const removedBreakline = removeOneBreakline();
+  if (!removedBreakline) {
+    removeSelection();
   }
+  return;
+}
+
+if (e.key === "Delete") {
+  e.preventDefault();
+  removeSelection();
+  return;
+}
+
+if (e.key === "r" || e.key === "R") {
+  restoreSelection();
+  return;
+}
+
+if (e.key === "Enter") {
+  e.preventDefault();
+
+  if (selectedIndices.length > 0) {
+    const lastSelected = selectedIndices[selectedIndices.length - 1];
+    pushUndo();
+    words[lastSelected].breakAfter = (words[lastSelected].breakAfter ?? 0) + 1;
+    renderTranscript(words);
+    updateEditButtonStates();
+  }
+  return;
+}
 });
 
 btnSaveEdl.addEventListener("click", async () => {
   if (!pieceTable) return;
 
   try {
+    syncBreakAfterToPieceTable();
     const payload = { version: 2, pieceTable };
     const json = JSON.stringify(payload, null, 2);
     const savedPath = await otter.saveEdl(json);
@@ -2170,6 +2245,7 @@ btnLoadEdl.addEventListener("click", async () => {
       word: ve.entry.word,
       start: ve.entry.sourceStart,
       end: ve.entry.sourceEnd,
+      breakAfter: ve.entry.breakAfter,
     }));
 
     // Load the source audio waveform
