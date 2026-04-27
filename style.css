@@ -18,10 +18,37 @@ body {
 
 header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  padding: 0px 12px;
+  gap: clamp(4px, 1.2vw, 12px);
+  padding: clamp(2px, 0.5vw, 6px) clamp(6px, 1.2vw, 12px);
   border-bottom: 1px solid #ddd;
+}
+
+header img {
+  height: clamp(20px, 3.5vw, 40px);
+  width: auto;
+}
+
+header button,
+header select {
+  font-size: clamp(11px, 1.3vw, 14px);
+  padding: clamp(2px, 0.4vw, 6px) clamp(4px, 0.8vw, 10px);
+  white-space: nowrap;
+  min-width: 0;
+}
+
+header label {
+  font-size: clamp(11px, 1.3vw, 14px);
+  white-space: nowrap;
+}
+
+.headerDivider {
+  width: 1px;
+  align-self: stretch;
+  background: #ddd;
+  margin: 4px 0;
+  flex-shrink: 0;
 }
 
 .title { font-weight: 700; margin-right: 8px; }
@@ -30,20 +57,21 @@ header {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: clamp(4px, 1vw, 10px);
+  min-width: 0;
 }
 
 #transcribeProgress {
-  width: 180px;
-  height: 14px;
+  width: clamp(80px, 15vw, 180px);
+  height: clamp(10px, 1.2vw, 14px);
 }
 
 /* Status pill (hidden by default) */
 #status {
   display: none;
-  padding: 4px 8px;
+  padding: clamp(2px, 0.4vw, 4px) clamp(4px, 0.8vw, 8px);
   border-radius: 6px;
-  font-size: 14px;
+  font-size: clamp(11px, 1.3vw, 14px);
   white-space: nowrap;
 }
 
@@ -52,6 +80,26 @@ header {
 #status.working { background: #dbeafe; color: #1e40af; }
 #status.error   { background: #fee2e2; color: #991b1b; }
 #status.success { background: #dcfce7; color: #166534; }
+
+/* --- Header responsive breakpoints --- */
+
+@media (max-width: 860px) {
+  header { gap: 6px; padding: 3px 8px; }
+  header button,
+  header select  { font-size: 12px; padding: 3px 6px; }
+  header label   { font-size: 12px; }
+  #transcribeProgress { width: 120px; }
+}
+
+@media (max-width: 600px) {
+  header { gap: 4px; padding: 2px 6px; }
+  header img { height: 20px; }
+  header button,
+  header select  { font-size: 11px; padding: 2px 4px; }
+  header label   { font-size: 11px; }
+  #transcribeProgress { width: 80px; height: 10px; }
+  .headerDivider { display: none; }
+}
 
 /* ============================================================================
    Main Two-Pane Layout
