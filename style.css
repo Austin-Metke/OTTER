@@ -258,6 +258,122 @@ main {
   text-decoration: line-through;
 }
 
+/* ============================================================================
+   Mobile web support
+   ========================================================================== */
+
+@media (max-width: 760px) {
+  html,
+  body {
+    width: 100%;
+    overflow: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 6px 8px;
+    overflow-x: auto;
+  }
+
+  header img {
+    width: 48px;
+    height: auto;
+  }
+
+  header button,
+  header select {
+    min-height: 36px;
+  }
+
+  .headerDivider {
+    display: none;
+  }
+
+  .statusArea {
+    flex: 1 0 100%;
+    margin-left: 0;
+    min-width: 0;
+  }
+
+  #status {
+    white-space: normal;
+  }
+
+  #transcribeProgress {
+    flex: 1;
+    min-width: 120px;
+    width: auto;
+  }
+
+  main {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(40vh, 1fr);
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .wavePane {
+    border-right: 0;
+    border-bottom: 1px solid #ddd;
+    gap: 8px;
+  }
+
+  .devPanel {
+    display: none;
+  }
+
+  .textPane {
+    overflow: visible;
+  }
+
+  .transport {
+    grid-template-columns: auto 1fr;
+    row-gap: 6px;
+  }
+
+  .transportGroup.center {
+    justify-self: end;
+  }
+
+  .transportGroup.right {
+    grid-column: 1 / -1;
+    justify-self: start;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  #loadedFile {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #transcript {
+    line-height: 2;
+    touch-action: pan-y;
+    -webkit-user-select: none;
+  }
+
+  .word {
+    display: inline-block;
+    padding: 3px 3px;
+    touch-action: manipulation;
+  }
+
+  #searchBar {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+  }
+
+  #searchInput {
+    width: auto;
+    min-width: 0;
+    flex: 1;
+  }
+}
+
 .word.added {
   color: #22863a;
   font-style: italic;

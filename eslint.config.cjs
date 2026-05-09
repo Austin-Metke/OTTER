@@ -45,7 +45,7 @@ module.exports = [
     }
   },
   {
-    files: ["src/renderer.ts"],
+    files: ["src/renderer.ts", "src/api.ts"],
     languageOptions: {
       parserOptions: {
         sourceType: "module"

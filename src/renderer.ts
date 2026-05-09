@@ -154,13 +154,25 @@ declare global {
 const SEEK_EPS = 0.01;
 const DETAIL_PAD_BEFORE = 0.25; // seconds
 const DETAIL_PAD_AFTER  = 0.25; // seconds
+const HAS_COARSE_POINTER = window.matchMedia("(pointer: coarse)").matches;
 
 
 //
 // Global State
 //
-const WaveSurfer = window.WaveSurfer as any;
-const otter = window.otter;
+const WaveSurfer = (window as any).WaveSurfer as any;
+
+// In Electron mode, window.otter is set by preload.ts.
+// In browser mode, we use the REST API implementation from api.ts.
+// The api.ts module is loaded via a separate script tag or dynamic import.
+let otter: OtterApi;
+if ((window as any).otter) {
+  otter = (window as any).otter;
+} else if ((window as any).__otterApi) {
+  otter = (window as any).__otterApi;
+} else {
+  throw new Error("No OTTER API available. Ensure api.js is loaded before renderer.js.");
+}
 
 let audioPath: string | null = null;
 let words: TranscriptWord[] = [];
@@ -170,6 +182,10 @@ let selectionAnchor: number | null = null;
 let selectedIndices: number[] = [];
 let playheadIndex = -1;
 let isDragging = false;
+let touchSelectionPointerId: number | null = null;
+let touchSelectionAnchor: number | null = null;
+let touchSelectionMoved = false;
+let suppressNextTranscriptClick = false;
 
 type UndoSnapshot = {
   pieces: Piece[];
@@ -244,6 +260,26 @@ function mustGetEl<T extends HTMLElement>(id: string): T {
   return el as T;
 }
 
+function randomIdSuffix(): string {
+  const cryptoApi = globalThis.crypto;
+
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID().slice(0, 8);
+  }
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    try {
+      const bytes = new Uint8Array(4);
+      cryptoApi.getRandomValues(bytes);
+      return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    } catch {
+      // Fall through to Math.random for older or restricted browser contexts.
+    }
+  }
+
+  return Math.random().toString(36).slice(2, 10).padEnd(8, "0");
+}
+
 
 // ---------------------------------------------------------------------------
 // Piece Table utility functions
@@ -262,7 +298,7 @@ function buildPieceTableFromTranscript(
 ): PieceTableData {
   const now = new Date().toISOString();
   const originalBuffer: PieceEntry[] = transcriptWords.map((w, i) => ({
-    id: `w${i}_${crypto.randomUUID().slice(0, 8)}`,
+    id: `w${i}_${randomIdSuffix()}`,
     word: w.word,
     sourceStart: w.start,
     sourceEnd: w.end,
@@ -1074,9 +1110,19 @@ function buildPreviewWordTimesFromActiveEntries(activeEntries: ViewEntry[]): Arr
 }
 
 async function loadMainWaveFromPath(filePath: string) {
-  const ab = await otter.readFileAsArrayBuffer(filePath);
-  const blob = new Blob([ab]);
-  await ws.loadBlob(blob);
+  if (_isBrowserMode()) {
+    // In browser mode, filePath is a file_id or URL — load via URL
+    const url = filePath.startsWith("/api/") ? filePath : `/api/audio/files/${filePath}`;
+    await ws.load(url);
+  } else {
+    const ab = await otter.readFileAsArrayBuffer(filePath);
+    const blob = new Blob([ab]);
+    await ws.loadBlob(blob);
+  }
+}
+
+function _isBrowserMode(): boolean {
+  return !(window as any).otter;
 }
 
 async function refreshMainWavePreviewFromEdits() {
@@ -1172,6 +1218,141 @@ function setSelectionRange(start: number | null, end: number | null) {
   }
 }
 
+function getWordIndexFromElement(el: Element | null): number | null {
+  const wordEl = el?.closest(".word") as HTMLElement | null;
+  if (!wordEl) return null;
+  const idx = Number(wordEl.dataset.index);
+  return Number.isInteger(idx) ? idx : null;
+}
+
+function getWordIndexAtPoint(clientX: number, clientY: number): number | null {
+  return getWordIndexFromElement(document.elementFromPoint(clientX, clientY));
+}
+
+function suppressSyntheticTranscriptClick() {
+  suppressNextTranscriptClick = true;
+  window.setTimeout(() => {
+    suppressNextTranscriptClick = false;
+  }, 450);
+}
+
+async function openSelectedTranscriptRange(focusIndex: number) {
+  const selected = uniqueSortedIndices(selectedIndices);
+  const targetIndex = selected.includes(focusIndex)
+    ? focusIndex
+    : selected[0] ?? focusIndex;
+
+  if (targetIndex < 0 || targetIndex >= words.length) return;
+
+  const targetWord = words[targetIndex];
+  const seekTime = isEditedPreviewMode && previewWordTimes[targetIndex]
+    ? previewWordTimes[targetIndex].start
+    : Number(targetWord.start);
+  ws.setTime(seekTime + SEEK_EPS);
+  setPlayheadIndex(targetIndex);
+
+  let rangeStartIdx = targetIndex;
+  let rangeEndIdx = targetIndex;
+  if (selected.length > 1 && isContiguousSelection(selected)) {
+    rangeStartIdx = selected[0];
+    rangeEndIdx = selected[selected.length - 1];
+  }
+
+  const rangeStart = Number(words[rangeStartIdx].start);
+  const rangeEnd = Number(words[rangeEndIdx].end);
+
+  detailSelStart = rangeStartIdx;
+  detailSelEnd = rangeEndIdx;
+
+  try {
+    await loadDetailForRange(rangeStart, rangeEnd);
+  } catch (err: unknown) {
+    console.error("Failed to load detail snippet:", err);
+  }
+}
+
+async function activateTranscriptWord(
+  index: number,
+  opts: { toggle?: boolean; extend?: boolean } = {}
+) {
+  if (index < 0 || index >= words.length) return;
+
+  if (opts.toggle) {
+    if (selectedIndices.includes(index)) {
+      setSelectedIndices(selectedIndices.filter((idx) => idx !== index), selectionAnchor);
+    } else {
+      setSelectedIndices(selectedIndices.concat(index), index);
+    }
+  } else if (opts.extend && selectionAnchor != null) {
+    setSelectionRange(selectionAnchor, index);
+  } else {
+    selectionAnchor = index;
+    setSelectionRange(index, index);
+  }
+
+  if (!selectedIndices.includes(index)) return;
+  await openSelectedTranscriptRange(index);
+}
+
+function beginTouchTranscriptSelection(span: HTMLElement, index: number, event: PointerEvent) {
+  if (event.pointerType !== "touch") return;
+
+  touchSelectionPointerId = event.pointerId;
+  touchSelectionAnchor = index;
+  touchSelectionMoved = false;
+  selectionAnchor = index;
+  setSelectionRange(index, index);
+
+  try {
+    span.setPointerCapture(event.pointerId);
+  } catch {
+    // Capture is best-effort; the point lookup below still works without it.
+  }
+}
+
+function updateTouchTranscriptSelection(event: PointerEvent) {
+  if (event.pointerType !== "touch") return;
+  if (touchSelectionPointerId !== event.pointerId || touchSelectionAnchor == null) return;
+
+  const hoveredIndex = getWordIndexAtPoint(event.clientX, event.clientY);
+  if (hoveredIndex == null || hoveredIndex === selectionEnd) return;
+
+  touchSelectionMoved = true;
+  setSelectionRange(touchSelectionAnchor, hoveredIndex);
+}
+
+function endTouchTranscriptSelection(span: HTMLElement, index: number, event: PointerEvent) {
+  if (event.pointerType !== "touch") return;
+  if (touchSelectionPointerId !== event.pointerId) return;
+
+  suppressSyntheticTranscriptClick();
+
+  try {
+    span.releasePointerCapture(event.pointerId);
+  } catch {
+    // Capture may already have been released by the browser.
+  }
+
+  const focusIndex = touchSelectionMoved
+    ? selectedIndices[0] ?? touchSelectionAnchor ?? index
+    : index;
+
+  touchSelectionPointerId = null;
+  touchSelectionAnchor = null;
+  touchSelectionMoved = false;
+
+  void openSelectedTranscriptRange(focusIndex);
+}
+
+function cancelTouchTranscriptSelection(event: PointerEvent) {
+  if (event.pointerType !== "touch") return;
+  if (touchSelectionPointerId !== event.pointerId) return;
+
+  touchSelectionPointerId = null;
+  touchSelectionAnchor = null;
+  touchSelectionMoved = false;
+}
+
 // Compute a small snippet window around a word boundary.
 // This keeps the detail waveform focused on just the selected word plus context.
 function computeDetailWindow(start: number, end: number) {
@@ -1265,7 +1446,7 @@ function renderTranscript(words: TranscriptWord[]) {
     span.className = "word";
     span.textContent = w.word + " ";
     span.dataset.index = String(i);
-    span.draggable = true;
+    span.draggable = !HAS_COARSE_POINTER;
 
     const ve = viewEntries[i];
     if (ve) {
@@ -1274,7 +1455,24 @@ function renderTranscript(words: TranscriptWord[]) {
       else if (ve.status === "moved") span.classList.add("moved");
     }
 
+    span.addEventListener("pointerdown", (event: PointerEvent) => {
+      beginTouchTranscriptSelection(span, i, event);
+    });
+
+    span.addEventListener("pointermove", (event: PointerEvent) => {
+      updateTouchTranscriptSelection(event);
+    });
+
+    span.addEventListener("pointerup", (event: PointerEvent) => {
+      endTouchTranscriptSelection(span, i, event);
+    });
+
+    span.addEventListener("pointercancel", (event: PointerEvent) => {
+      cancelTouchTranscriptSelection(event);
+    });
+
     span.addEventListener("mousedown", (event: MouseEvent) => {
+      if (HAS_COARSE_POINTER) return;
       if (event.button !== 0) return;
       if (event.ctrlKey || event.metaKey) return;
 
@@ -1292,6 +1490,7 @@ function renderTranscript(words: TranscriptWord[]) {
     });
 
     span.addEventListener("mouseenter", () => {
+      if (HAS_COARSE_POINTER) return;
       if (!isMouseSelecting || selectionAnchor == null) return;
       if (selectionEnd !== i || selectionStart !== selectionAnchor) {
         mouseSelectionMoved = true;
@@ -1347,51 +1546,21 @@ function renderTranscript(words: TranscriptWord[]) {
     });
 
     span.addEventListener("click", async (event: MouseEvent) => {
+      if (suppressNextTranscriptClick) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       if (mouseSelectionMoved) {
         mouseSelectionMoved = false;
         return;
       }
 
-      // Transcript click = select word + seek main audio
-      if (event.ctrlKey || event.metaKey) {
-        if (selectedIndices.includes(i)) {
-          setSelectedIndices(selectedIndices.filter((idx) => idx !== i), selectionAnchor);
-        } else {
-          setSelectedIndices(selectedIndices.concat(i), i);
-        }
-      } else if (event.shiftKey && selectionAnchor != null) {
-        setSelectionRange(selectionAnchor, i);
-      } else {
-        selectionAnchor = i;
-        setSelectionRange(i, i);
-      }
-
-      if (!selectedIndices.includes(i)) return;
-
-      const seekTime = isEditedPreviewMode && previewWordTimes[i]
-        ? previewWordTimes[i].start
-        : Number(w.start);
-      ws.setTime(seekTime + SEEK_EPS);
-      setPlayheadIndex(i);
-
-      // Load the detail waveform snippet centered on the selected range
-      let rangeStartIdx = i;
-      let rangeEndIdx = i;
-      if (selectedIndices.length > 1 && isContiguousSelection(selectedIndices)) {
-        rangeStartIdx = selectedIndices[0];
-        rangeEndIdx = selectedIndices[selectedIndices.length - 1];
-      }
-      const rangeStart = Number(words[rangeStartIdx].start);
-      const rangeEnd = Number(words[rangeEndIdx].end);
-
-      detailSelStart = rangeStartIdx;
-      detailSelEnd = rangeEndIdx;
-
-      try {
-        await loadDetailForRange(rangeStart, rangeEnd);
-      } catch (err: unknown) {
-        console.error("Failed to load detail snippet:", err);
-      }
+      await activateTranscriptWord(i, {
+        toggle: event.ctrlKey || event.metaKey,
+        extend: event.shiftKey,
+      });
     });
 
     // Drag Selection: mousedown
@@ -1400,6 +1569,7 @@ function renderTranscript(words: TranscriptWord[]) {
     //   • Record selectionAnchor as the origin point (never changes during drag)
     //   • Highlight the starting word immediately
     span.addEventListener("mousedown", (event: MouseEvent) => {
+      if (HAS_COARSE_POINTER) return;
       event.preventDefault();
       isDragging = true;
       selectionAnchor = i;
@@ -1414,6 +1584,7 @@ function renderTranscript(words: TranscriptWord[]) {
     //   • Both forward and backward drag work because setSelectionRange()
     //     normalizes the range order internally
     span.addEventListener("mouseover", (event: MouseEvent) => {
+      if (HAS_COARSE_POINTER) return;
       if (!isDragging) return;
       const hoveredIndex = Number((event.target as HTMLElement).dataset.index);
       if (selectionAnchor != null && !isNaN(hoveredIndex)) {
@@ -1455,7 +1626,7 @@ function renderTranscript(words: TranscriptWord[]) {
  * preventing a "stuck" drag state.
  */
 function initializeDragEnd() {
-  window.addEventListener("mouseup", (_event: MouseEvent) => {
+  window.addEventListener("mouseup", () => {
     if (isDragging) {
       isDragging = false;
       // Selection remains as-is; do not modify it further
@@ -1838,15 +2009,18 @@ btnChoose.addEventListener("click", async () => {
   updateEditButtonStates();
 
   btnPlay.disabled = true;
-  let fname = audioPath.split("/").pop() ?? audioPath;
+  let fname: string;
+  if (_isBrowserMode()) {
+    const getFn = (window as any).__otterApiGetFilename;
+    fname = (getFn && getFn()) || "uploaded audio";
+  } else {
+    fname = audioPath.split("/").pop() ?? audioPath;
+  }
   setStatus(`Loaded: ${fname}`, "success");
   setPlayIcon(false);
   btnTranscribe.disabled = false;
 
-  // Load waveform from local file bytes via preload bridge
-  const ab = await otter.readFileAsArrayBuffer(audioPath);
-  const blob = new Blob([ab]);
-  await ws.loadBlob(blob);
+  await loadMainWaveFromPath(audioPath);
 
   btnPlay.disabled = false;
 
@@ -2215,9 +2389,14 @@ btnSaveEdl.addEventListener("click", async () => {
     const json = JSON.stringify(payload, null, 2);
     const savedPath = await otter.saveEdl(json);
     if (savedPath) {
-      const fname = savedPath.split("/").pop() ?? savedPath;
-      setStatus(`EDL saved: ${fname}`, "success");
-      appendLog(`EDL saved to ${savedPath}\n`);
+      if (savedPath === "downloaded") {
+        setStatus("EDL saved (downloaded)", "success");
+        appendLog("EDL downloaded to browser.\n");
+      } else {
+        const fname = savedPath.split("/").pop() ?? savedPath;
+        setStatus(`EDL saved: ${fname}`, "success");
+        appendLog(`EDL saved to ${savedPath}\n`);
+      }
     }
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -2246,6 +2425,24 @@ btnLoadEdl.addEventListener("click", async () => {
 
     undoStack = [];
     redoStack = [];
+
+    // In browser mode, the EDL's sourceFile is an absolute path that won't work.
+    // If we already have an uploaded audio loaded, use that; otherwise prompt re-upload.
+    if (_isBrowserMode() && !pieceTable.sourceFile.startsWith("/api/")) {
+      if (audioPath) {
+        // Reuse currently loaded audio
+        pieceTable.sourceFile = audioPath;
+      } else {
+        setStatus("Please upload the source audio file for this EDL.", "info");
+        const fileId = await otter.chooseAudioFile();
+        if (!fileId) {
+          setStatus("EDL load canceled — no source audio.", "info");
+          return;
+        }
+        pieceTable.sourceFile = fileId;
+      }
+    }
+
     audioPath = pieceTable.sourceFile;
 
     const viewEntries = getViewEntries(pieceTable);
@@ -2257,12 +2454,16 @@ btnLoadEdl.addEventListener("click", async () => {
     }));
 
     // Load the source audio waveform
-    const ab = await otter.readFileAsArrayBuffer(audioPath);
-    const blob = new Blob([ab]);
-    await ws.loadBlob(blob);
+    await loadMainWaveFromPath(audioPath);
 
     // Update UI state
-    const fname = audioPath.split("/").pop() ?? audioPath;
+    let fname: string;
+    if (_isBrowserMode()) {
+      const getFn = (window as any).__otterApiGetFilename;
+      fname = (getFn && getFn()) || result.path || "audio";
+    } else {
+      fname = audioPath.split("/").pop() ?? audioPath;
+    }
     fnameEl.textContent = shortenFilenameMiddle(fname);
     setStatus(`EDL loaded (${viewEntries.length} entries)`, "success");
     appendLog(`EDL loaded from ${result.path}\n`);
@@ -2310,9 +2511,14 @@ btnSaveEdits.addEventListener("click", async () => {
     const json = JSON.stringify(exportPayload, null, 2);
     const outPath = await otter.exportEdlAudio(json);
     if (outPath) {
-      const fname = outPath.split("/").pop() ?? outPath;
-      setStatus(`Exported: ${fname}`, "success");
-      appendLog(`Audio exported to ${outPath}\n`);
+      if (outPath === "downloaded") {
+        setStatus("Audio exported (downloaded)", "success");
+        appendLog("Audio exported via browser download.\n");
+      } else {
+        const fname = outPath.split("/").pop() ?? outPath;
+        setStatus(`Exported: ${fname}`, "success");
+        appendLog(`Audio exported to ${outPath}\n`);
+      }
     } else {
       setStatus("Export canceled.", "info");
     }

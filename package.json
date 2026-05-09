@@ -6,7 +6,10 @@
   "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json",
+    "build:web": "tsc -p tsconfig.renderer.json",
     "start": "npm run build && electron .",
+    "serve": "npm run build:web && uvicorn otter_py.server:app --reload --host 0.0.0.0 --port 8000",
+    "serve:mobile": "npm run serve",
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
