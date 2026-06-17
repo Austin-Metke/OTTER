@@ -31,9 +31,9 @@
  */
 
 import { app, BrowserWindow, dialog, ipcMain, IpcMainInvokeEvent, OpenDialogOptions } from "electron";
-import path from "path";
+import path, { resolve } from "path";
 import fs from "fs";
-import { spawn, spawnSync, ChildProcess } from "child_process";
+import { spawn, spawnSync, ChildProcess} from "child_process";
 
 type TranscribeSpec =
   | { mode: "file"; name: string }
@@ -59,10 +59,6 @@ type Edl = {
  * Control messages that (in the long-lived worker mode) can be sent to the Python
  * transcription process over stdin as line-delimited JSON.
  *
- * Important: This PoC currently uses a one-shot process invocation for transcription
- * (`stdio: ["ignore", ...]` below), so pause/resume are not wired through. The types
- * remain here because the Python side supports cooperative control and the Electron
- * UI already models the states.
  */
 type TranscriptionControlCommand =
   | { type: "pause" }
@@ -79,13 +75,16 @@ type TranscriptionControlCommand =
  * - short-circuit resolution as `{ cancelled: true }` on cancellation
  */
 type ManagedTranscriptionProcess = ChildProcess & {
-  otterState?: "running" | "paused" | "cancelling";
+  otterState?: "running" | "paused" | "cancelling"| "pause-requested";
   otterCancelled?: boolean;
 };
 
 let win: BrowserWindow | null = null;
 let activeProcess: ManagedTranscriptionProcess | null = null;
 const repoRoot = path.join(__dirname, "..");
+const AUDIO_EXTS = new Set([".wav", ".mp3", ".m4a", ".flac", ".ogg", ".webm"]);
+
+
 
 function ensureDir(p: string) {
   fs.mkdirSync(p, { recursive: true });
@@ -133,6 +132,87 @@ app.on("window-all-closed", () => {
   app.quit();
 });
 
+//==========================================================================
+
+function assertSafeAudioPath(inputPath: string): string {
+  if (typeof inputPath !== "string" || inputPath.includes("\0")) {
+    throw new Error("Invalid audio path");
+  }
+
+  const resolved = path.resolve(inputPath);
+  const ext = path.extname(resolved).toLowerCase();
+
+  if (!AUDIO_EXTS.has(ext)) {
+    throw new Error("Unsupported audio file type");
+  }
+
+  const stat = fs.lstatSync(resolved);
+  if (!stat.isFile()) {
+    throw new Error("Audio path is not a file");
+  }
+
+  return resolved;
+}
+
+function assertSafeSegment(start: unknown, end: unknown) {
+  const s = Number(start);
+  const e = Number(end);
+
+  if (!Number.isFinite(s) || !Number.isFinite(e) || s < 0 || e <= s) {
+    throw new Error("Invalid EDL segment");
+  }
+
+  if (e - s > 60 * 10) {
+    throw new Error("Preview segement too long");
+  }
+
+  return { start: s, end: e };
+}
+
+//==========================================================================
+
+function extractAudioSection( audioPath: string, start:number, end: number){
+  //assert the segment is safe to use prior to resolving
+    const seg = assertSafeSegment(start,end);
+    const duration = seg.end - seg.start;
+
+    return new Promise<Buffer>((resolve,reject)=> {
+
+      const args = [
+        "-hide_banner",
+        "-loglevel", "error",
+        "-ss", String(seg.start),
+        "-i",audioPath,
+        "-t", String(duration),
+        "-f" , "wav",
+        "pipe:1",
+      ];
+
+    const ff = spawn("ffmpeg", args);
+
+    if(!ff.stdout || !ff.stderr){
+      reject(new Error("ffmpeg did not expose stdout/stderr"));
+      return;
+    }
+
+    const chunks: Buffer[]= [];
+    let stderr = "";
+
+    ff.stdout.on("data",chunk => chunks.push(chunk));
+    ff.stderr.on("data", chunk => {
+      stderr += chunk.toString();
+    });
+
+    ff.on("error", reject);
+
+    ff.on("close", code =>{
+      if( code === 0 )resolve(Buffer.concat(chunks));
+      else reject(new Error(`ffmpeg exited with ${code}: ${stderr}`));
+    }
+    );
+  });
+}
+
 /**
  * IPC: Show a native file picker and return the selected audio file path.
  *
@@ -146,8 +226,7 @@ ipcMain.handle("choose-audio-file", async () => {
     title: "Choose an audio file",
     properties: ["openFile"],
     filters: [
-      { name: "Audio", extensions: ["wav"] },
-      { name: "All Files", extensions: ["*"] }
+      { name: "Audio", extensions: ["wav","mp3","m4a"] }
     ]
   };
 
@@ -172,12 +251,14 @@ ipcMain.handle("choose-audio-file", async () => {
  * @returns {Promise<{start_time:number, sample_rate:(number|null)}>}
  */
 ipcMain.handle("probe-audio", async (_event: IpcMainInvokeEvent, inputPath: string) => {
+  const audioPath = assertSafeAudioPath(inputPath);
+
   const args = [
     "-v", "error",
     "-select_streams", "a:0",
     "-show_entries", "stream=start_time,sample_rate",
     "-of", "json",
-    inputPath
+    audioPath
   ];
 
   const child = spawn("ffprobe", args);
@@ -279,8 +360,6 @@ function getPythonPath() {
 /**
  * 
  */
-// Used by earlier refactors; retained for future control routing.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function sendControlCommand(
   proc: ManagedTranscriptionProcess,
   cmd: TranscriptionControlCommand
@@ -439,25 +518,22 @@ ipcMain.handle(
     } else {
       specFile = path.join(repoRoot, "otter_py", "sample_specs", "default_spec.json");
     }
+    const safeAudioPath =  assertSafeAudioPath(audioPath);
 
-    const { logLine: workerCacheLog } = buildPythonWorkerEnv();
+    const { env, logLine: workerCacheLog } = buildPythonWorkerEnv();
     event.sender.send(
       "transcribe-log",
-      `INFO:PythonWorker=enabled | Audio=${audioPath}\n` + workerCacheLog
+      `INFO:PythonWorker=enabled | Audio=${safeAudioPath}\n` + workerCacheLog
     );
 
     const python = getPythonPath();
-    const argv = ["-m", "otter_py.transcribe", "run", "--audio", audioPath];
+    const argv = ["-m", "otter_py.transcribe", "run", "--audio", safeAudioPath];
     if (specFile) argv.push("--spec-file", specFile);
     if (specJson) argv.push("--spec-json", specJson);
 
-    const { env } = buildPythonWorkerEnv();
     const child = spawn(python, argv, {
       cwd: repoRoot,
-      // Important: leaving stdin open as a pipe can cause local transcription
-      // backends to hang indefinitely on Windows. This one-shot path does not
-      // need stdin for control messages, so close it up front.
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       env,
     }) as ManagedTranscriptionProcess;
 
@@ -587,39 +663,40 @@ ipcMain.handle(
   });
 
 ipcMain.handle("pause-transcription", async () => {
-  if (!activeProcess || !activeProcess.pid) return false;
-  if (activeProcess.otterState !== "running") return false;
-  try {
-    process.kill(activeProcess.pid, "SIGSTOP");
-    activeProcess.otterState = "paused";
-    return true;
-  } catch {
-    return false;
-  }
+  if(!activeProcess) return {ok: false};
+
+  activeProcess.otterState = "pause-requested";
+  sendControlCommand(activeProcess,{type:"pause"});
+
+  return {ok : true}
 });
 
 ipcMain.handle("resume-transcription", async () => {
-  if (!activeProcess || !activeProcess.pid) return false;
-  if (activeProcess.otterState !== "paused") return false;
-  try {
-    process.kill(activeProcess.pid, "SIGCONT");
-    activeProcess.otterState = "running";
-    return true;
-  } catch {
-    return false;
-  }
+  if(!activeProcess) return {ok: false};
+
+  activeProcess.otterState = "running";
+  sendControlCommand(activeProcess,{type: "resume"});
+
+  return{ok: true};
 });
 
 /**
  * 
  */
 ipcMain.handle("cancel-transcription", async () => {
-  if (!activeProcess) return false;
+  if (!activeProcess) return {ok: false};
 
-  const proc = activeProcess;
-  proc.otterCancelled = true;
-  proc.otterState = "cancelling";
-  return terminateProcess(proc);
+  activeProcess.otterCancelled = true;
+  activeProcess.otterState = "cancelling";
+  sendControlCommand(activeProcess, {type: "cancel"});
+
+  setTimeout(()=> {
+    if(activeProcess && !activeProcess.killed){
+      terminateProcess(activeProcess);
+    }
+
+  }, 3000);
+  return {ok: true};
 });
 
 ipcMain.handle("get-transcription-state", async () => {
@@ -710,7 +787,7 @@ ipcMain.handle(
       wavPath,
     ];
     await runFfmpeg(args);
-    return wavPath;
+    return assertSafeAudioPath(wavPath);
   }
 );
 
@@ -751,7 +828,7 @@ ipcMain.handle(
       result.filePath,
     ];
     await runFfmpeg(args);
-    return result.filePath;
+    return assertSafeAudioPath(result.filePath);
   }
 );
 
@@ -778,6 +855,8 @@ ipcMain.handle(
     startSec: number,
     durSec: number
   ) => {
+    //make the path for audiofile safe
+    const safeAudioPath = assertSafeAudioPath(audioPath);
     // Store snippets in a temp-ish folder that exists for packaged/dev
     const outDir = path.join(app.getPath("userData"), "snippets");
     fs.mkdirSync(outDir, { recursive: true });
@@ -792,13 +871,14 @@ ipcMain.handle(
       `snippet_${Date.now()}_${Math.floor(Math.random() * 1e6)}.wav`
     );
 
+
     // ffmpeg: extract small WAV segment (PCM)
     const args = [
       "-hide_banner",
       "-y",
       "-ss", String(safeStart),
       "-t", String(safeDur),
-      "-i", audioPath,
+      "-i", safeAudioPath,
       "-c:a", "pcm_s16le",
       outPath
     ];
@@ -807,6 +887,16 @@ ipcMain.handle(
     return outPath;
   }
 );
+
+/**
+ * 
+ */
+ipcMain.handle("audio-section", 
+  async(_event,audioPath: string, start: number,end)=> {
+  const safePath = assertSafeAudioPath(audioPath);
+  const seg = assertSafeSegment(start, end);
+  return await extractAudioSection(safePath,seg.start,seg.end);
+})
 
 // =============================================================================
 // EDL: Save / Load / Export
@@ -878,7 +968,12 @@ ipcMain.handle("render-edited-preview", async (_event: IpcMainInvokeEvent, edlJs
   }
 
   const getSource = (e: any) => (typeof e.sourceFile === "string" ? e.sourceFile : edl.sourceFile);
-  const sources = Array.from(new Set(entries.map(getSource)));
+  //santize the inputs
+  const safeEntries = entries.map((e:any) => ({
+    sourceFile: assertSafeAudioPath(getSource(e)),
+    segment: assertSafeSegment(e.sourceStart, e.sourceEnd),
+  }));
+  const sources = Array.from(new Set(safeEntries.map(e => e.sourceFile)));
 
   const inputArgs: string[] = [];
   for (const src of sources) {
@@ -889,11 +984,11 @@ ipcMain.handle("render-edited-preview", async (_event: IpcMainInvokeEvent, edlJs
   const concatInputs: string[] = [];
 
   for (let i = 0; i < entries.length; i++) {
-    const e: any = entries[i];
-    const src = getSource(e);
-    const inputIndex = Math.max(0, sources.indexOf(src));
+    const e: any = safeEntries[i];
+    const inputIndex = sources.indexOf(e.sourceFile);
+    const {start, end} = e.segment;
     filterParts.push(
-      `[${inputIndex}:a]atrim=start=${e.sourceStart}:end=${e.sourceEnd},asetpts=PTS-STARTPTS[a${i}]`
+      `[${inputIndex}:a]atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS[a${i}]`
     );
     concatInputs.push(`[a${i}]`);
   }
@@ -902,7 +997,7 @@ ipcMain.handle("render-edited-preview", async (_event: IpcMainInvokeEvent, edlJs
     filterParts.join("; ") +
     "; " +
     concatInputs.join("") +
-    `concat=n=${entries.length}:v=0:a=1[out]`;
+    `concat=n=${safeEntries.length}:v=0:a=1[out]`;
 
   const outDir = path.join(app.getPath("userData"), "preview_audio");
   fs.mkdirSync(outDir, { recursive: true });
@@ -962,7 +1057,12 @@ ipcMain.handle("export-edl-audio", async (_event: IpcMainInvokeEvent, edlJson: s
   //   [0]atrim=start=S1:end=E1,asetpts=PTS-STARTPTS[a1];
   //   [a0][a1]concat=n=2:v=0:a=1[out]
   const getSource = (e: any) => (typeof e.sourceFile === "string" ? e.sourceFile : edl.sourceFile);
-  const sources = Array.from(new Set(entries.map(getSource)));
+  const safeEntries = entries.map((e: any) => ({
+    sourceFile: assertSafeAudioPath(getSource(e)),
+    segment: assertSafeSegment(e.sourceStart, e.sourceEnd),
+  }));
+
+  const sources = Array.from(new Set(safeEntries.map(e => e.sourceFile)));
 
   const inputArgs: string[] = [];
   for (const src of sources) {
@@ -972,21 +1072,23 @@ ipcMain.handle("export-edl-audio", async (_event: IpcMainInvokeEvent, edlJson: s
   const filterParts: string[] = [];
   const concatInputs: string[] = [];
 
-  for (let i = 0; i < entries.length; i++) {
-    const e: any = entries[i];
-    const src = getSource(e);
-    const inputIndex = Math.max(0, sources.indexOf(src));
-    filterParts.push(
-      `[${inputIndex}:a]atrim=start=${e.sourceStart}:end=${e.sourceEnd},asetpts=PTS-STARTPTS[a${i}]`
-    );
-    concatInputs.push(`[a${i}]`);
-  }
+  for (let i = 0; i < safeEntries.length; i++) {
+  const e = safeEntries[i];
+  const inputIndex = sources.indexOf(e.sourceFile);
+  const { start, end } = e.segment;
+
+  filterParts.push(
+    `[${inputIndex}:a]atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS[a${i}]`
+  );
+
+  concatInputs.push(`[a${i}]`);
+}
 
   const filterComplex =
     filterParts.join("; ") +
     "; " +
     concatInputs.join("") +
-    `concat=n=${entries.length}:v=0:a=1[out]`;
+    `concat=n=${safeEntries.length}:v=0:a=1[out]`;
 
   const args = [
     "-hide_banner",

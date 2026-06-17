@@ -73,6 +73,7 @@ ehthumbs.db
 *~
 
 # Editors / IDEs
+.vscode
 .vscode/*
 !.vscode/settings.json
 !.vscode/launch.json
@@ -95,3 +96,4 @@ ehthumbs.db
 
 # Local config not intended for version control
 config.local.*
+.planning

@@ -1,14 +1,30 @@
 {
-  "name": "otter-readonly-proto",
+  "name": "otter-proto",
   "productName": "OTTER",
   "version": "0.1.0",
   "main": "dist/main.js",
   "private": true,
   "scripts": {
+    "app:dir": "electron-builder --dir",
+    "app:dist": "electron-builder",
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json",
     "start": "npm run build && electron .",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "postinstall": "electron-builder install-app-deps"
   },
+  "build": {
+    "appId": "otter.app",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "mas": {
+      "category": "public.app-category.productivity"
+    }
+  }
+  ,
   "dependencies": {
     "electron": "^41.2.0",
     "wavesurfer.js": "^7.8.6"

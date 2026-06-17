@@ -130,6 +130,7 @@ type OtterApi = {
   probeAudio: (audioPath: string) => Promise<{ start_time: number; sample_rate: number | null }>;
   onTranscribeProgress: (cb: (pct: number) => void) => void;
   makeSnippet: (audioPath: string, startSec: number, durSec: number) => Promise<string>;
+  audioSection:(audioPath: string,viewportStart: number, viewportEnd: number) => Promise<ArrayBuffer>;
   readFileAsArrayBuffer: (filePath: string) => Promise<ArrayBuffer>;
   listSpecFiles: () => Promise<string[]>;
   readSpecFile: (name: string) => Promise<string>;
@@ -140,9 +141,9 @@ type OtterApi = {
   renderEditedPreview: (edlJson: string) => Promise<string>;
   saveMicRecording: (data: ArrayBuffer, mimeType: string) => Promise<string>;
   saveMicRecordingAs: (data: ArrayBuffer, mimeType: string) => Promise<string | null>;
-  pauseTranscription: () => Promise<boolean>;
-  resumeTranscription: () => Promise<boolean>;
-  cancelTranscription: () => Promise<boolean>;
+  pauseTranscription: () => Promise<{ok: boolean}>;
+  resumeTranscription: () => Promise<{ok: boolean}>;
+  cancelTranscription: () => Promise<{ok:boolean}>;
 };
 
 declare global {
@@ -274,9 +275,9 @@ type EditorState = {
   interactionMode: InteractionMode;
 };
 
-let importedEditor: EditorState;
-let pendingImportEditor: EditorState;
-let recordedEditor: EditorState;
+let importedEditor: EditorState; //final/main transcript
+let pendingImportEditor: EditorState;// imported staging
+let recordedEditor: EditorState;// recorded staging
 let activeEditor: EditorState;
 let playheadIndex = -1;
 let isDragging = false;
@@ -1436,37 +1437,26 @@ findInput.addEventListener("keydown", (event: KeyboardEvent) => {
 function clearSearchHighlights() {
   const transcriptWords = activeEditor.paneEl.querySelectorAll(".word");
 
-  for (let i = 0; i < transcriptWords.length; i++) {
-    const wordElement = transcriptWords[i] as HTMLElement;
+  transcriptWords.forEach((node)=> {
+    const wordElement = node as HTMLElement;
     const index = Number(wordElement.dataset.index);
-    const wordText = activeEditor.words[index].word;    
-    wordElement.innerHTML = wordText + " ";
-  }
+    const wordText = activeEditor.words[index]?.word ?? "";
+    renderHighlightedWord(wordElement, wordText, "");
+  });
 }
 
-  findInput.addEventListener("input", () =>{
-    const searchQuery = findInput.value.trim().toLowerCase();
-    const transcriptWords = activeEditor.paneEl.querySelectorAll(".word");
-   
-    for(let i = 0; i < transcriptWords.length; i++)
-    {
-      const wordElement = transcriptWords[i] as HTMLElement;
-      const index = Number(wordElement.dataset.index);
-      const wordText = activeEditor.words[index].word;
-      wordElement.innerHTML = wordText + " ";
-      const matchPosition = wordText.toLowerCase().indexOf(searchQuery)
-      if(matchPosition === -1)
-      {
-        continue;
-      }
-      
-      const before = wordText.slice(0,matchPosition);
-      const matchingChar = wordText.slice(matchPosition, matchPosition + searchQuery.length);
-      const after = wordText.slice(matchPosition + searchQuery.length);
-      wordElement.innerHTML=  before +'<span class="highlight">' + matchingChar + '</span>' +after +" ";
-    }
+findInput.addEventListener("input", () => {
+  const searchQuery = findInput.value.trim().toLowerCase();
+  const transcriptWords = activeEditor.paneEl.querySelectorAll(".word");
 
-})
+  transcriptWords.forEach((node)=> {
+    const wordElement = node as HTMLElement;
+    const index = Number(wordElement.dataset.index);
+    const wordText = activeEditor.words[index]?.word ?? "";
+
+    renderHighlightedWord(wordElement, wordText, searchQuery);
+  });
+});
 function uniqueSortedIndices(indices: number[]): number[] {
   const unique = Array.from(new Set(indices));
   unique.sort((a, b) => a - b);
@@ -1720,6 +1710,20 @@ function setPlayheadIndex(idx: number) {
     const el = transcriptEl.querySelector(`.word[data-index="${idx}"]`);
     if (el) el.classList.add("playhead");
   }
+
+}
+
+async function loadWaveformWindow(
+  wsInstance: any,
+  audioPath: string,
+  start: number,
+  end: number
+) {
+  const wav = await otter.audioSection(audioPath, start, end);
+
+  await wsInstance.loadBlob(
+    new Blob([wav], { type: "audio/wav" })
+  );
 }
 
 /**
@@ -1762,13 +1766,18 @@ function computeDetailWindow(start: number, end: number) {
  */
 async function loadDetailForRange(sourceFile: string, start: number, end: number) {
   if (!sourceFile) throw new Error("No audio loaded");
-  const { winStart, winDur } = computeDetailWindow(start, end);
+  const { winStart, winEnd } = computeDetailWindow(start, end);
+
+  // Map the range's absolute times into snippet-local times
+  const localRangeStart = start - winStart;
+  const localRangeEnd = end - winStart;
 
   // Create a short WAV snippet around the selected word (main process uses ffmpeg)
-  const snippetPath = await otter.makeSnippet(sourceFile, winStart, winDur);
-
-  // If the detail waveform is currently playing, stop it before swapping media
-  if (wsDetail.isPlaying()) wsDetail.pause();
+  const wav = await otter.audioSection(
+    sourceFile,
+    winStart,
+    winEnd
+  );
 
   // Enable/show detail UI now that detail audio exists
   waveDetailPane.hidden = false;
@@ -1777,17 +1786,17 @@ async function loadDetailForRange(sourceFile: string, start: number, end: number
   btnRegion.disabled = false;
   setDetailPlayIcon(false);
 
-  // Map the range's absolute times into snippet-local times
-  const localRangeStart = start - winStart;
-  const localRangeEnd = end - winStart;
 
-  // Attach the handler BEFORE calling load() to avoid missing "ready" in fast loads
+  // Attach ready handler BEFORE loading
   wsDetail.once("ready", () => {
     setDetailWordRegion(localRangeStart, localRangeEnd);
     wsDetail.setTime(localRangeStart);
   });
+  
+  await wsDetail.loadBlob(
+    new Blob([wav], { type: "audio/wav" })
+  );
 
-  await wsDetail.load(snippetPath);
 }
 
 /**
@@ -2068,6 +2077,41 @@ function initializeDragEnd() {
       // Selection remains as-is; do not modify it further
     }
   });
+}
+
+function renderHighlightedWord(
+  wordElement: HTMLElement,
+  wordText: string,
+  searchQuery: string
+) {
+  wordElement.replaceChildren();
+
+  if (!searchQuery) {
+    wordElement.textContent = wordText + " ";
+    return;
+  }
+
+  const lowerWord = wordText.toLowerCase();
+  const lowerQuery = searchQuery;
+  const matchPosition = lowerWord.indexOf(lowerQuery);
+
+  if (matchPosition === -1) {
+    wordElement.textContent = wordText + " ";
+    return;
+  }
+
+  const before = wordText.slice(0, matchPosition);
+  const match = wordText.slice(matchPosition, matchPosition + searchQuery.length);
+  const after = wordText.slice(matchPosition + searchQuery.length);
+
+  wordElement.appendChild(document.createTextNode(before));
+
+  const mark = document.createElement("span");
+  mark.className = "highlight";
+  mark.textContent = match;
+  wordElement.appendChild(mark);
+
+  wordElement.appendChild(document.createTextNode(after + " "));
 }
 
 //==============================================================================
@@ -2656,8 +2700,8 @@ btnTranscribe.addEventListener("click", async () => {
 // Handle the "Pause / Resume" button
 btnPause.addEventListener("click", async () => {
   if (!isPaused) {
-    const ok = await otter.pauseTranscription();
-    if (!ok) {
+    const result = await otter.pauseTranscription();
+    if (!result.ok) {
       setStatus("Unable to pause transcription.", "error");
       return;
     }
@@ -2665,8 +2709,8 @@ btnPause.addEventListener("click", async () => {
     btnPause.textContent = "▶ Resume";
     setStatus("Transcription paused.", "info");
   } else {
-    const ok = await otter.resumeTranscription();
-    if (!ok) {
+    const result = await otter.resumeTranscription();
+    if (!result.ok) {
       setStatus("Unable to resume transcription.", "error");
       return;
     }

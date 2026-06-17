@@ -58,8 +58,11 @@ class ControlManager:
     """
 
     def __init__(self) -> None:
-        self._paused = threading.Event()
         self._cancelled = threading.Event()
+
+        self._resume_event = threading.Event()
+        self._resume_event.set()
+
         self._thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._thread.start()
 
@@ -79,14 +82,14 @@ class ControlManager:
                 kind = msg.get("type")
 
                 if kind == "pause":
-                    self._paused.set()
+                    self._resume_event.clear()
                     eprint("CONTROL:PAUSED")
                 elif kind == "resume":
-                    self._paused.clear()
+                    self._resume_event.set()
                     eprint("CONTROL:RESUMED")
                 elif kind == "cancel":
                     self._cancelled.set()
-                    self._paused.clear()
+                    self._resume_event.set()
                     eprint("CONTROL:CANCELLING")
                     return
                 elif kind == "ping":
@@ -96,20 +99,18 @@ class ControlManager:
         except Exception as ex:
             eprint(f"WARN:control loop ended unexpectedly: {type(ex).__name__}:{ex}")
 
-    def wait_if_paused(self) -> None:
-        while self._paused.is_set():
-            if self._cancelled.is_set():
-                raise TranscriptionCancelled("Transcription cancelled while paused")
-            time.sleep(0.1)
 
     def throw_if_cancelled(self) -> None:
         if self._cancelled.is_set():
             raise TranscriptionCancelled("Transcription cancelled")
+        
+    def wait_if_paused(self):
+        self._resume_event.wait()
+        self.throw_if_cancelled()
 
     def checkpoint(self) -> None:
         self.throw_if_cancelled()
         self.wait_if_paused()
-        self.throw_if_cancelled()
 
     def progress_wrapper(self, fn):
         """Emit progress without checkpointing — avoids TranscriptionCancelled in bridge threads."""
