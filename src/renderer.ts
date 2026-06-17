@@ -275,9 +275,9 @@ type EditorState = {
   interactionMode: InteractionMode;
 };
 
-let importedEditor: EditorState;
-let pendingImportEditor: EditorState;
-let recordedEditor: EditorState;
+let importedEditor: EditorState; //final/main transcript
+let pendingImportEditor: EditorState;// imported staging
+let recordedEditor: EditorState;// recorded staging
 let activeEditor: EditorState;
 let playheadIndex = -1;
 let isDragging = false;
@@ -1710,6 +1710,20 @@ function setPlayheadIndex(idx: number) {
     const el = transcriptEl.querySelector(`.word[data-index="${idx}"]`);
     if (el) el.classList.add("playhead");
   }
+
+}
+
+async function loadWaveformWindow(
+  wsInstance: any,
+  audioPath: string,
+  start: number,
+  end: number
+) {
+  const wav = await otter.audioSection(audioPath, start, end);
+
+  await wsInstance.loadBlob(
+    new Blob([wav], { type: "audio/wav" })
+  );
 }
 
 /**
@@ -2686,8 +2700,8 @@ btnTranscribe.addEventListener("click", async () => {
 // Handle the "Pause / Resume" button
 btnPause.addEventListener("click", async () => {
   if (!isPaused) {
-    const ok = await otter.pauseTranscription();
-    if (!ok) {
+    const result = await otter.pauseTranscription();
+    if (!result.ok) {
       setStatus("Unable to pause transcription.", "error");
       return;
     }
@@ -2695,8 +2709,8 @@ btnPause.addEventListener("click", async () => {
     btnPause.textContent = "▶ Resume";
     setStatus("Transcription paused.", "info");
   } else {
-    const ok = await otter.resumeTranscription();
-    if (!ok) {
+    const result = await otter.resumeTranscription();
+    if (!result.ok) {
       setStatus("Unable to resume transcription.", "error");
       return;
     }
